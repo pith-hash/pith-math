@@ -24,7 +24,7 @@
 //!   `pivot <= ε·s` / `|det| <= ε·s³`, and reported as `None` — a
 //!   degenerate RANSAC triplet is data, not an error.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![deny(missing_docs)]
 
 mod dct;
@@ -32,6 +32,8 @@ mod fft;
 mod linalg;
 mod median;
 mod solve3;
+
+pub mod ffi;
 
 pub use dct::{dct2, dct2_2d, dct2_in_place, idct2, idct2_2d};
 pub use fft::{Complex, fft, fft_real, ifft};

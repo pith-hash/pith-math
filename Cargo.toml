@@ -23,6 +23,8 @@ pith-digest = { git = "https://github.com/pith-hash/pith-digest.git", branch = "
 name = "gen-reference"
 path = "tools/gen-reference/main.rs"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [lints.rust]
-unsafe_code = "forbid"
 missing_docs = "deny"

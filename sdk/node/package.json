@@ -1,0 +1,32 @@
+{
+  "name": "@pith-hash/pith-math",
+  "version": "0.1.0",
+  "description": "FFT, DCT-II, median and 3x3 linear algebra SDK via the pith-math Rust cdylib (koffi, prebuilt)",
+  "license": "MIT",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "prebuilds/"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "koffi": "^2.12.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pith-hash/pith-math.git",
+    "directory": "sdk/node"
+  },
+  "keywords": [
+    "fft",
+    "dct",
+    "median",
+    "linear-algebra",
+    "hashing"
+  ]
+}

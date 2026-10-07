@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tier": 1,
-  "description": "pith foundation: pith-math (zero-dep Rust)",
+  "description": "pith foundation: math (zero-dep Rust)",
   "homepage": "",
   "topics": []
 }

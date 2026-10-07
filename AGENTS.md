@@ -3,7 +3,7 @@
 ## Quick reference
 
 - Repo: `pith-hash/pith-math`
-- Description: pith foundation: pith-math (zero-dep Rust)
+- Description: pith foundation: math (zero-dep Rust)
 - License: Apache-2.0
 
 ## Build & Test

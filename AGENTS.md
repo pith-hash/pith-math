@@ -4,7 +4,7 @@
 
 - Repo: `pith-hash/pith-math`
 - Description: pith foundation: math (zero-dep Rust)
-- License: Apache-2.0
+- License: MIT
 
 ## Build & Test
 

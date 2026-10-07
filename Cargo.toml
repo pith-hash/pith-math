@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 description = "FFT, DCT-II, median, 3x3 solve and small linear algebra."
 readme = "README.md"
-license = "Apache-2.0"
+license = "MIT"
 repository = "https://github.com/pith-hash/pith-math"
 categories = ["algorithms", "cryptography"]
 

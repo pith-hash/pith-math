@@ -75,8 +75,56 @@ fn verify_accepts_the_committed_file() {
     assert!(ok, "gen-reference verify failed:\n{err}");
 }
 
+/// Strip the output arrays of approx (twiddle-factor) vectors: those
+/// are platform-libm samples and are only meaningful through verify's
+/// tolerances. Every other byte — names, exact flags, shapes, recorded
+/// budgets, inputs — must match the committed file exactly.
+fn mask_approx_outputs(s: &str) -> String {
+    let mut out = String::new();
+    let mut exact = true;
+    let mut in_approx_output = false;
+    for line in s.lines() {
+        let t = line.trim_end();
+        let trimmed = t.trim_start();
+        if trimmed.starts_with('"')
+            && trimmed.contains("\": {")
+            && !trimmed.starts_with("\"vectors\"")
+        {
+            exact = true; // reset until this entry's exact flag is seen
+        }
+        if trimmed.starts_with("\"exact\":") {
+            exact = trimmed.contains("true");
+        }
+        if trimmed.starts_with("\"output\": [") {
+            if exact {
+                in_approx_output = false;
+                out.push_str(t);
+                out.push('\n');
+            } else {
+                in_approx_output = true;
+            }
+            continue;
+        }
+        if in_approx_output {
+            if trimmed.starts_with(']') {
+                in_approx_output = false;
+                out.push_str(t);
+                out.push('\n');
+            }
+            continue; // drop the element line
+        }
+        out.push_str(t);
+        out.push('\n');
+    }
+    out
+}
+
 #[test]
-fn regenerated_file_is_byte_identical() {
+fn regenerated_contract_matches_committed() {
+    // gen → throwaway path; every libm-independent field must match the
+    // committed file byte-for-byte. The approx outputs themselves are
+    // platform samples: the same run must verify its own file, and the
+    // committed file is checked by verify_accepts_the_committed_file.
     let tmp = std::env::temp_dir().join("pith-math-reference-regen.json");
     let out = bin()
         .args(["gen", tmp.to_str().expect("utf-8 temp path")])
@@ -88,9 +136,15 @@ fn regenerated_file_is_byte_identical() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let fresh = std::fs::read(&tmp).expect("read regenerated file");
-    let committed = std::fs::read("tests/reference.json").expect("read committed file");
-    assert_eq!(fresh, committed, "tests/reference.json is not current");
+    let fresh = std::fs::read_to_string(&tmp).expect("read regenerated file");
+    let committed = committed();
+    assert_eq!(
+        mask_approx_outputs(&fresh),
+        mask_approx_outputs(&committed),
+        "tests/reference.json contract drifted (names/exact/shape/tols/inputs)"
+    );
+    let (ok, err) = verify(&tmp);
+    assert!(ok, "verify of a fresh gen failed:\n{err}");
     let _ = std::fs::remove_file(&tmp);
 }
 

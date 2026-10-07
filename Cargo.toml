@@ -10,6 +10,10 @@ repository = "https://github.com/pith-hash/pith-math"
 categories = ["algorithms", "cryptography"]
 
 [dependencies]
+# The library itself is dependency-free. pith-digest is a dev-dependency:
+# only the conformance tests use its SplitMix64, and crates.io rejects
+# git deps in [dependencies] (this keeps `cargo publish` viable).
+[dev-dependencies]
 pith-digest = { git = "https://github.com/pith-hash/pith-digest.git", branch = "main" }
 
 # The reference-vector generator (tools/gen-reference) is a bin of this

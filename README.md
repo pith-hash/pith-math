@@ -32,6 +32,7 @@ A drifted `reference.json` fails CI.
 ## Suite rules
 
 - `#![forbid(unsafe_code)]` and `#![deny(missing_docs)]` are not optional.
-- Dependencies: `pith-digest` only (its `SplitMix64` seeds the
-  deterministic test signals). No registry packages.
+- The library itself is dependency-free; `pith-digest` is a
+  dev-dependency only (its `SplitMix64` seeds the deterministic test
+  signals). No registry packages.
 - Zero third-party dependencies is enforced by `scripts/check-zero-deps.py`.

@@ -41,10 +41,13 @@ use std::process::ExitCode;
 const DEFAULT_PATH: &str = "tests/reference.json";
 
 /// Error budgets for the twiddle-factor kernels: one part absolute
-/// (near-zero bins), one part relative to the expected magnitude. Both
-/// sit orders of magnitude above cross-platform `libm` noise (≲ a few
-/// ulps) and far below any real algorithmic drift.
-const TOL_ABS: f64 = 1e-15;
+/// (near-zero bins), one part relative to the expected magnitude. The
+/// absolute floor must sit above the cancellation-noise floor of the
+/// near-zero bins, where platform `libm` differences move the value by
+/// a few ulps of the *summands* (1e-14 for an 8×8 block of ±3.5), not
+/// ulps of the tiny result; both budgets stay orders of magnitude below
+/// any real algorithmic drift.
+const TOL_ABS: f64 = 1e-13;
 const TOL_REL: f64 = 1e-12;
 
 /// One recorded vector: the named kernel, its input, and the output the

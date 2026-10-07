@@ -2,8 +2,23 @@
 name = "pith-math"
 version = "0.1.0"
 edition = "2024"
-description = "pith foundation: math (zero-dep Rust)"
+rust-version = "1.85"
+description = "FFT, DCT-II, median, 3x3 solve and small linear algebra."
 readme = "README.md"
 license = "Apache-2.0"
+repository = "https://github.com/pith-hash/pith-math"
+categories = ["algorithms", "cryptography"]
 
 [dependencies]
+pith-digest = { git = "https://github.com/pith-hash/pith-digest.git", branch = "main" }
+
+# The reference-vector generator (tools/gen-reference) is a bin of this
+# package so `cargo run --locked --bin gen-reference -- verify` works from
+# the repo root with no extra workspace member.
+[[bin]]
+name = "gen-reference"
+path = "tools/gen-reference/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"

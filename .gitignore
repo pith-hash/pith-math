@@ -1,4 +1,5 @@
 # Binaries
+/target
 /pith-math
 *.exe
 *.dll

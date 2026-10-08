@@ -46,6 +46,25 @@ __all__ = [
     "mat3_mul",
     "mat3_mul_vec",
     "median",
+    "complex_div",
+    "complex_exp",
+    "complex_log",
+    "complex_mul",
+    "complex_powi",
+    "complex_sqrt",
+    "complex_arg",
+    "fft_n",
+    "ifft_n",
+    "dct3",
+    "dct3_2d",
+    "conv",
+    "corr",
+    "mean",
+    "variance",
+    "cov",
+    "lagrange",
+    "ransac_line",
+    "dtw",
     "STATUS_OK",
     "STATUS_INVALID",
     "STATUS_REJECTED",
@@ -152,11 +171,50 @@ def _load() -> ctypes.CDLL:
             "pith_math_transpose3",
             "pith_math_mat3_mul",
             "pith_math_mat3_mul_vec",
+            "pith_math_complex_div",
+            "pith_math_complex_exp",
+            "pith_math_complex_log",
+            "pith_math_complex_mul",
+            "pith_math_complex_powi",
+            "pith_math_complex_sqrt",
+            "pith_math_fft_n",
+            "pith_math_ifft_n",
+            "pith_math_dct3",
+            "pith_math_dct3_2d",
         ):
             _bind_alloc(lib, name)
         _bind_alloc(lib, "pith_math_dct2_2d", two_d=True)
-        for name in ("pith_math_det3", "pith_math_median"):
+        _bind_alloc(lib, "pith_math_dct3_2d", two_d=True)
+        for name in ("pith_math_det3", "pith_math_median", "pith_math_mean",
+                     "pith_math_var", "pith_math_cov", "pith_math_complex_arg"):
             _bind_scalar(lib, name)
+        # Packed two-operand kernels: (ptr, len, a_len, out**, out_len*).
+        for name in ("pith_math_conv", "pith_math_corr", "pith_math_dtw"):
+            fn = getattr(lib, name)
+            fn.argtypes = [
+                ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t,
+                ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t),
+            ] if name != "pith_math_dtw" else [
+                ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t,
+                ctypes.POINTER(ctypes.c_double),
+            ]
+            fn.restype = ctypes.c_int32
+        # Lagrange: (ptr, len, x: f64, out*).
+        fn = lib.pith_math_lagrange
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_double,
+                       ctypes.POINTER(ctypes.c_double)]
+        fn.restype = ctypes.c_int32
+        # complex_powi: (ptr, len, n, out**, out_len*).
+        fn = lib.pith_math_complex_powi
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t,
+                       ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t)]
+        fn.restype = ctypes.c_int32
+        # RANSAC: (ptr, len, threshold, iterations, seed, out**, out_len*).
+        fn = lib.pith_math_ransac_line
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_double,
+                       ctypes.c_size_t, ctypes.c_uint64,
+                       ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t)]
+        fn.restype = ctypes.c_int32
         lib.pith_math_free.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
         lib.pith_math_free.restype = None
         _lib = lib
@@ -273,3 +331,163 @@ def median(x) -> float:
     never the mean of the two middles. Empty input raises
     :class:`FfiError` with ``status == STATUS_INVALID``."""
     return _call_scalar("pith_math_median", x)
+
+
+# ---------------------------------------------------------------------
+# Tier-1 expansion
+# ---------------------------------------------------------------------
+
+
+def complex_mul(z, w) -> list[float]:
+    """Complex product of two interleaved pairs ``[re, im]``."""
+    return _call_alloc("pith_math_complex_mul", list(z) + list(w))
+
+
+def complex_div(z, w) -> list[float]:
+    """Complex quotient ``z / w`` (Smith's scaled algorithm); a zero
+    denominator raises :class:`FfiError` with ``STATUS_REJECTED``."""
+    return _call_alloc("pith_math_complex_div", list(z) + list(w))
+
+
+def complex_exp(z) -> list[float]:
+    """``e^z`` for the interleaved pair ``z``."""
+    return _call_alloc("pith_math_complex_exp", z)
+
+
+def complex_log(z) -> list[float]:
+    """Principal-branch natural logarithm ``[ln|z|, arg z]``; ``z = 0``
+    raises :class:`FfiError` with ``STATUS_REJECTED``."""
+    return _call_alloc("pith_math_complex_log", z)
+
+
+def complex_sqrt(z) -> list[float]:
+    """Principal square root of the interleaved pair ``z``."""
+    return _call_alloc("pith_math_complex_sqrt", z)
+
+
+def complex_powi(z, n: int) -> list[float]:
+    """Integer power by exponentiation-by-squaring; ``n`` may be zero
+    (exactly one) or negative (reciprocal through ``n``'s absolute
+    value, per the C surface's ``usize`` exponent)."""
+    fn = getattr(_load(), "pith_math_complex_powi")
+    out = ctypes.c_void_p()
+    out_len = ctypes.c_size_t()
+    buf = _pack(z)
+    status = fn(buf, 0 if buf is None else len(buf), n if n >= 0 else 0,
+                ctypes.byref(out), ctypes.byref(out_len))
+    if status != STATUS_OK:
+        raise FfiError("pith_math_complex_powi", status)
+    try:
+        count = out_len.value // ctypes.sizeof(ctypes.c_double)
+        return list(ctypes.cast(out, ctypes.POINTER(ctypes.c_double))[:count])
+    finally:
+        _load().pith_math_free(out, out_len.value)
+
+
+def complex_arg(z) -> float:
+    """The principal argument of ``z`` in radians, ``(-π, π]``."""
+    return _call_scalar("pith_math_complex_arg", z)
+
+
+def fft_n(x) -> list[float]:
+    """Forward DFT of **any** ``n ≥ 1`` (Bluestein below the radix-2
+    sizes): interleaved complex pairs in, interleaved spectrum out."""
+    return _call_alloc("pith_math_fft_n", x)
+
+
+def ifft_n(x) -> list[float]:
+    """Inverse of :func:`fft_n`."""
+    return _call_alloc("pith_math_ifft_n", x)
+
+
+def dct3(x) -> list[float]:
+    """Orthonormal DCT-III — the exact inverse (transposed kernel) of
+    :func:`dct2`."""
+    return _call_alloc("pith_math_dct3", x)
+
+
+def dct3_2d(x, w: int, h: int) -> list[float]:
+    """Separable 2D orthonormal DCT-III over a ``w × h`` row-major
+    matrix; the exact inverse of :func:`dct2_2d`."""
+    return _call_alloc("pith_math_dct3_2d", x, w, h)
+
+
+def conv(x, k) -> list[float]:
+    """Linear convolution of ``x`` with kernel ``k`` — full mode,
+    ``len`` ``= len(x) + len(k) − 1`` (direct below 256 elements,
+    FFT above)."""
+    return _call_alloc("pith_math_conv", list(x) + list(k), len(x))
+
+
+def corr(x, k) -> list[float]:
+    """Cross-correlation — :func:`conv` with the flipped kernel."""
+    return _call_alloc("pith_math_corr", list(x) + list(k), len(x))
+
+
+def mean(x) -> float:
+    """Arithmetic mean; empty input raises :class:`FfiError` with
+    ``STATUS_INVALID``."""
+    return _call_scalar("pith_math_mean", x)
+
+
+def variance(x) -> float:
+    """Population variance (``1/n`` normalisation)."""
+    return _call_scalar("pith_math_var", x)
+
+
+def cov(x) -> float:
+    """Covariance of the paired samples in ``x`` (interleaved pairs);
+    fewer than two pairs raises ``STATUS_INVALID``."""
+    return _call_scalar("pith_math_cov", x)
+
+
+def lagrange(xs, ys, x: float) -> float:
+    """Lagrange interpolation through ``(xs[i], ys[i])`` evaluated at
+    ``x``. Degenerate node sets (duplicate x-coordinates, mismatched
+    lengths) raise :class:`FfiError` with ``STATUS_INVALID``."""
+    if len(xs) != len(ys):
+        raise FfiError("pith_math_lagrange", STATUS_INVALID)
+    packed = [v for pair in zip(xs, ys) for v in pair]
+    fn = getattr(_load(), "pith_math_lagrange")
+    buf = _pack(packed)
+    out = ctypes.c_double()
+    status = fn(buf, 0 if buf is None else len(buf), float(x), ctypes.byref(out))
+    if status != STATUS_OK:
+        raise FfiError("pith_math_lagrange", status)
+    return out.value
+
+
+def ransac_line(xs, ys, threshold: float, iterations: int, seed: int):
+    """Seeded RANSAC line fit: returns ``(slope, intercept, inliers)``
+    where ``inliers`` counts points within ``threshold`` of the model,
+    or ``None`` when no two-point sample produced a usable line."""
+    if len(xs) != len(ys):
+        raise FfiError("pith_math_ransac_line", STATUS_INVALID)
+    packed = [v for pair in zip(xs, ys) for v in pair]
+    fn = getattr(_load(), "pith_math_ransac_line")
+    buf = _pack(packed)
+    out = ctypes.c_void_p()
+    out_len = ctypes.c_size_t()
+    status = fn(buf, 0 if buf is None else len(buf), float(threshold),
+                int(iterations), int(seed), ctypes.byref(out), ctypes.byref(out_len))
+    if status != STATUS_OK:
+        raise FfiError("pith_math_ransac_line", status)
+    try:
+        count = out_len.value // ctypes.sizeof(ctypes.c_double)
+        vals = list(ctypes.cast(out, ctypes.POINTER(ctypes.c_double))[:count])
+    finally:
+        _load().pith_math_free(out, out_len.value)
+    return vals[0], vals[1], int(vals[2])
+
+
+def dtw(a, b) -> float:
+    """Dynamic time warping distance (absolute-difference local cost,
+    three monotone steps, optimal path, no window constraint); empty
+    input raises :class:`FfiError` with ``STATUS_INVALID``."""
+    fn = getattr(_load(), "pith_math_dtw")
+    buf = _pack(list(a) + list(b))
+    out = ctypes.c_double()
+    status = fn(buf, 0 if buf is None else len(buf), len(a), ctypes.byref(out))
+    if status != STATUS_OK:
+        raise FfiError("pith_math_dtw", status)
+    return out.value

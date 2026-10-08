@@ -119,6 +119,35 @@ function loadLibrary() {
   /** Scalar-out op: input, len, out slot. */
   const scalar = (name) =>
     lib.func(name, "int32_t", ["const double *", "size_t", koffi.out(koffi.pointer("double"))]);
+  /** Packed two-operand op: input, len, a_len, out buffer, out length. */
+  const packedPair = (name) =>
+    lib.func(name, "int32_t", [
+      "const double *",
+      "size_t",
+      "size_t",
+      koffi.out(koffi.pointer("void *")),
+      koffi.out(koffi.pointer("size_t")),
+    ]);
+  /** complex_powi: input, len, n, out buffer, out length. */
+  const powi = (name) =>
+    lib.func(name, "int32_t", [
+      "const double *",
+      "size_t",
+      "size_t",
+      koffi.out(koffi.pointer("void *")),
+      koffi.out(koffi.pointer("size_t")),
+    ]);
+  /** RANSAC: input, len, threshold, iterations, seed, out buffer, out length. */
+  const ransac = (name) =>
+    lib.func(name, "int32_t", [
+      "const double *",
+      "size_t",
+      "double",
+      "size_t",
+      "uint64_t",
+      koffi.out(koffi.pointer("void *")),
+      koffi.out(koffi.pointer("size_t")),
+    ]);
   cached = {
     dct2: alloc("pith_math_dct2"),
     idct2: alloc("pith_math_idct2"),
@@ -133,6 +162,29 @@ function loadLibrary() {
     mat3_mul: alloc("pith_math_mat3_mul"),
     mat3_mul_vec: alloc("pith_math_mat3_mul_vec"),
     median: scalar("pith_math_median"),
+    complex_mul: alloc("pith_math_complex_mul"),
+    complex_div: alloc("pith_math_complex_div"),
+    complex_exp: alloc("pith_math_complex_exp"),
+    complex_log: alloc("pith_math_complex_log"),
+    complex_sqrt: alloc("pith_math_complex_sqrt"),
+    complex_powi: powi("pith_math_complex_powi"),
+    complex_arg: scalar("pith_math_complex_arg"),
+    fft_n: alloc("pith_math_fft_n"),
+    ifft_n: alloc("pith_math_ifft_n"),
+    dct3: alloc("pith_math_dct3"),
+    dct3_2d: alloc2d("pith_math_dct3_2d"),
+    conv: packedPair("pith_math_conv"),
+    corr: packedPair("pith_math_corr"),
+    mean: scalar("pith_math_mean"),
+    variance: scalar("pith_math_var"),
+    cov: scalar("pith_math_cov"),
+    lagrange: lib.func("pith_math_lagrange", "int32_t", [
+      "const double *", "size_t", "double", koffi.out(koffi.pointer("double")),
+    ]),
+    ransac_line: ransac("pith_math_ransac_line"),
+    dtw: lib.func("pith_math_dtw", "int32_t", [
+      "const double *", "size_t", "size_t", koffi.out(koffi.pointer("double")),
+    ]),
     free: lib.func("void pith_math_free(void *ptr, size_t len)"),
   };
   return cached;
@@ -321,6 +373,190 @@ function median(x) {
   return callScalar(loadLibrary().median, "pith_math_median", pack(x));
 }
 
+// ---------------------------------------------------------------------
+// Tier-1 expansion
+// ---------------------------------------------------------------------
+
+/**
+ * Complex product of two interleaved pairs `[re, im]`.
+ * @param {number[]} z
+ * @param {number[]} w
+ * @returns {number[]}
+ */
+function complex_mul(z, w) {
+  return callAlloc(loadLibrary().complex_mul, "pith_math_complex_mul", pack([...z, ...w]));
+}
+
+/**
+ * Complex quotient `z / w`; a zero denominator throws `FfiError`
+ * with `STATUS_REJECTED`.
+ * @param {number[]} z
+ * @param {number[]} w
+ * @returns {number[]}
+ */
+function complex_div(z, w) {
+  return callAlloc(loadLibrary().complex_div, "pith_math_complex_div", pack([...z, ...w]));
+}
+
+/** `e^z` for the interleaved pair `z`. */
+function complex_exp(z) {
+  return callAlloc(loadLibrary().complex_exp, "pith_math_complex_exp", pack(z));
+}
+
+/** Principal `[ln|z|, arg z]`; `z = 0` throws with `STATUS_REJECTED`. */
+function complex_log(z) {
+  return callAlloc(loadLibrary().complex_log, "pith_math_complex_log", pack(z));
+}
+
+/** Principal square root of the interleaved pair `z`. */
+function complex_sqrt(z) {
+  return callAlloc(loadLibrary().complex_sqrt, "pith_math_complex_sqrt", pack(z));
+}
+
+/**
+ * Integer power `z^n` by squaring (non-negative `n`).
+ * @param {number[]} z
+ * @param {number} n
+ * @returns {number[]}
+ */
+function complex_powi(z, n) {
+  const fn = loadLibrary().complex_powi;
+  const buf = pack(z);
+  const out = [null];
+  const outLen = [0];
+  const status = fn(buf, buf === null ? 0 : buf.length, n, out, outLen);
+  if (status !== STATUS_OK) throw new FfiError("pith_math_complex_powi", status);
+  try {
+    return [...new Float64Array(koffi.decode(out[0], koffi.array("double", outLen[0] / 8)))];
+  } finally {
+    loadLibrary().free(out[0], outLen[0]);
+  }
+}
+
+/** Principal argument of `z` in radians, `(-π, π]`. */
+function complex_arg(z) {
+  return callScalar(loadLibrary().complex_arg, "pith_math_complex_arg", pack(z));
+}
+
+/** Forward DFT of **any** `n ≥ 1` (Bluestein); interleaved pairs. */
+function fft_n(x) {
+  return callAlloc(loadLibrary().fft_n, "pith_math_fft_n", pack(x));
+}
+
+/** Inverse of {@link fft_n}. */
+function ifft_n(x) {
+  return callAlloc(loadLibrary().ifft_n, "pith_math_ifft_n", pack(x));
+}
+
+/** Orthonormal DCT-III — the exact inverse of {@link dct2}. */
+function dct3(x) {
+  return callAlloc(loadLibrary().dct3, "pith_math_dct3", pack(x));
+}
+
+/** Separable 2D orthonormal DCT-III; the inverse of {@link dct2_2d}. */
+function dct3_2d(x, w, h) {
+  return callAlloc(loadLibrary().dct3_2d, "pith_math_dct3_2d", pack(x), w, h);
+}
+
+/**
+ * Full-support linear convolution — `x.length + k.length − 1` samples.
+ * @param {number[]} x
+ * @param {number[]} k
+ * @returns {number[]}
+ */
+function conv(x, k) {
+  return callAlloc(loadLibrary().conv, "pith_math_conv", pack([...x, ...k]), x.length);
+}
+
+/** Cross-correlation — {@link conv} with the flipped kernel. */
+function corr(x, k) {
+  return callAlloc(loadLibrary().corr, "pith_math_corr", pack([...x, ...k]), x.length);
+}
+
+/** Arithmetic mean; empty input throws `STATUS_INVALID`. */
+function mean(x) {
+  return callScalar(loadLibrary().mean, "pith_math_mean", pack(x));
+}
+
+/** Sample variance (`n − 1` denominator); fewer than two throws. */
+function variance(x) {
+  return callScalar(loadLibrary().variance, "pith_math_var", pack(x));
+}
+
+/** Sample covariance of interleaved pairs; short input throws. */
+function cov(x) {
+  return callScalar(loadLibrary().cov, "pith_math_cov", pack(x));
+}
+
+/**
+ * Lagrange interpolation through `(xs[i], ys[i])` at `x`.
+ * @param {number[]} xs
+ * @param {number[]} ys
+ * @param {number} x
+ * @returns {number}
+ */
+function lagrange(xs, ys, x) {
+  if (xs.length !== ys.length) {
+    throw new FfiError("pith_math_lagrange", STATUS_INVALID);
+  }
+  const packed = [];
+  for (let i = 0; i < xs.length; i++) packed.push(xs[i], ys[i]);
+  const fn = loadLibrary().lagrange;
+  const buf = pack(packed);
+  const out = [0];
+  const status = fn(buf, buf === null ? 0 : buf.length, x, out);
+  if (status !== STATUS_OK) throw new FfiError("pith_math_lagrange", status);
+  return out[0];
+}
+
+/**
+ * Seeded RANSAC line fit: `[slope, intercept, inliers]`, or `null`
+ * when no model was found.
+ * @param {number[]} xs
+ * @param {number[]} ys
+ * @param {number} threshold
+ * @param {number} iterations
+ * @param {number} seed
+ * @returns {[number, number, number]|null}
+ */
+function ransac_line(xs, ys, threshold, iterations, seed) {
+  if (xs.length !== ys.length) {
+    throw new FfiError("pith_math_ransac_line", STATUS_INVALID);
+  }
+  const packed = [];
+  for (let i = 0; i < xs.length; i++) packed.push(xs[i], ys[i]);
+  const fn = loadLibrary().ransac_line;
+  const buf = pack(packed);
+  const out = [null];
+  const outLen = [0];
+  const status = fn(buf, buf === null ? 0 : buf.length, threshold, iterations, seed, out, outLen);
+  if (status === STATUS_REJECTED) return null;
+  if (status !== STATUS_OK) throw new FfiError("pith_math_ransac_line", status);
+  try {
+    const vals = [...new Float64Array(koffi.decode(out[0], koffi.array("double", outLen[0] / 8)))];
+    return [vals[0], vals[1], vals[2]];
+  } finally {
+    loadLibrary().free(out[0], outLen[0]);
+  }
+}
+
+/**
+ * Dynamic time warping distance (absolute-difference local cost,
+ * three monotone steps, optimal path); empty input throws
+ * `STATUS_INVALID`.
+ * @param {number[]} a
+ * @param {number[]} b
+ * @returns {number}
+ */
+function dtw(a, b) {
+  const fn = loadLibrary().dtw;
+  const buf = pack([...a, ...b]);
+  const out = [0];
+  const status = fn(buf, buf === null ? 0 : buf.length, a.length, out);
+  if (status !== STATUS_OK) throw new FfiError("pith_math_dtw", status);
+  return out[0];
+}
+
 module.exports = {
   STATUS_OK,
   STATUS_INVALID,
@@ -341,4 +577,23 @@ module.exports = {
   mat3_mul,
   mat3_mul_vec,
   median,
+  complex_mul,
+  complex_div,
+  complex_exp,
+  complex_log,
+  complex_sqrt,
+  complex_powi,
+  complex_arg,
+  fft_n,
+  ifft_n,
+  dct3,
+  dct3_2d,
+  conv,
+  corr,
+  mean,
+  variance,
+  cov,
+  lagrange,
+  ransac_line,
+  dtw,
 };

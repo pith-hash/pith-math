@@ -13,7 +13,11 @@ package pithmath
 
 typedef int32_t (*pith_alloc_fn)(const double *, size_t, double **, size_t *);
 typedef int32_t (*pith_alloc2d_fn)(const double *, size_t, size_t, size_t, double **, size_t *);
+typedef int32_t (*pith_alloc_len_fn)(const double *, size_t, size_t, double **, size_t *);
 typedef int32_t (*pith_scalar_fn)(const double *, size_t, double *);
+typedef int32_t (*pith_scalar_len_fn)(const double *, size_t, size_t, double *);
+typedef int32_t (*pith_scalar_arg_fn)(const double *, size_t, double, double *);
+typedef int32_t (*pith_ransac_fn)(const double *, size_t, double, size_t, uint64_t, double **, size_t *);
 typedef void (*pith_free_fn)(double *, size_t);
 
 static int32_t pith_call_alloc(void *fn, const double *in, size_t len,
@@ -28,6 +32,31 @@ static int32_t pith_call_alloc2d(void *fn, const double *in, size_t len,
 
 static int32_t pith_call_scalar(void *fn, const double *in, size_t len, double *out) {
     return ((pith_scalar_fn)fn)(in, len, out);
+}
+
+static int32_t pith_call_alloc_len(void *fn, const double *in, size_t len,
+                                   size_t a_len, double **out, size_t *out_len) {
+    return ((pith_alloc_len_fn)fn)(in, len, a_len, out, out_len);
+}
+
+static int32_t pith_call_scalar(void *fn, const double *in, size_t len, double *out) {
+    return ((pith_scalar_fn)fn)(in, len, out);
+}
+
+static int32_t pith_call_scalar_len(void *fn, const double *in, size_t len,
+                                    size_t a_len, double *out) {
+    return ((pith_scalar_len_fn)fn)(in, len, a_len, out);
+}
+
+static int32_t pith_call_scalar_arg(void *fn, const double *in, size_t len,
+                                    double arg, double *out) {
+    return ((pith_scalar_arg_fn)fn)(in, len, arg, out);
+}
+
+static int32_t pith_call_ransac(void *fn, const double *in, size_t len,
+                                double threshold, size_t iterations, uint64_t seed,
+                                double **out, size_t *out_len) {
+    return ((pith_ransac_fn)fn)(in, len, threshold, iterations, seed, out, out_len);
 }
 
 static void pith_call_free(void *fn, double *ptr, size_t len) {
@@ -127,6 +156,90 @@ func ffiScalar(libPath, op string, data *float64, n int, out *float64) (int32, e
 	var slot C.double
 	rc := C.pith_call_scalar(sym, (*C.double)(unsafe.Pointer(data)), C.size_t(n), &slot)
 	*out = float64(slot)
+	return int32(rc), nil
+}
+
+// ffiAllocLen is ffiAlloc with one extra size_t argument (conv/corr's
+// a_len, complex_powi's exponent).
+func ffiAllocLen(libPath, op string, data *float64, n, extra int, out **byte, outLen *uintptr) (int32, error) {
+	handle, err := openCdylib(libPath)
+	if err != nil {
+		return 0, err
+	}
+	defer C.dlclose(handle)
+
+	sym, err := resolveSymbol(handle, libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	var cOut *C.double
+	var cLen C.size_t
+	rc := C.pith_call_alloc_len(sym, (*C.double)(unsafe.Pointer(data)), C.size_t(n),
+		C.size_t(extra), &cOut, &cLen)
+	*out = (*byte)(unsafe.Pointer(cOut))
+	*outLen = uintptr(cLen)
+	return int32(rc), nil
+}
+
+// ffiScalarLen is ffiScalar with one extra size_t argument (dtw's
+// a_len split).
+func ffiScalarLen(libPath, op string, data *float64, n, aLen int, out *float64) (int32, error) {
+	handle, err := openCdylib(libPath)
+	if err != nil {
+		return 0, err
+	}
+	defer C.dlclose(handle)
+
+	sym, err := resolveSymbol(handle, libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	var slot C.double
+	rc := C.pith_call_scalar_len(sym, (*C.double)(unsafe.Pointer(data)), C.size_t(n),
+		C.size_t(aLen), &slot)
+	*out = float64(slot)
+	return int32(rc), nil
+}
+
+// ffiScalarArg is ffiScalar with one extra f64 argument (lagrange's
+// evaluation abscissa).
+func ffiScalarArg(libPath, op string, data *float64, n int, arg float64, out *float64) (int32, error) {
+	handle, err := openCdylib(libPath)
+	if err != nil {
+		return 0, err
+	}
+	defer C.dlclose(handle)
+
+	sym, err := resolveSymbol(handle, libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	var slot C.double
+	rc := C.pith_call_scalar_arg(sym, (*C.double)(unsafe.Pointer(data)), C.size_t(n),
+		C.double(arg), &slot)
+	*out = float64(slot)
+	return int32(rc), nil
+}
+
+// ffiRansac runs the seeded RANSAC line fit: threshold, iterations and
+// seed ride alongside the packed points.
+func ffiRansac(libPath, op string, data *float64, n int, threshold float64, iterations int, seed uint64, out **byte, outLen *uintptr) (int32, error) {
+	handle, err := openCdylib(libPath)
+	if err != nil {
+		return 0, err
+	}
+	defer C.dlclose(handle)
+
+	sym, err := resolveSymbol(handle, libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	var cOut *C.double
+	var cLen C.size_t
+	rc := C.pith_call_ransac(sym, (*C.double)(unsafe.Pointer(data)), C.size_t(n),
+		C.double(threshold), C.size_t(iterations), C.uint64_t(seed), &cOut, &cLen)
+	*out = (*byte)(unsafe.Pointer(cOut))
+	*outLen = uintptr(cLen)
 	return int32(rc), nil
 }
 

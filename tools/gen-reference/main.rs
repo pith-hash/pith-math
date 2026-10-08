@@ -32,8 +32,9 @@
 //! ```
 
 use pith_math::{
-    Complex, dct2, dct2_2d, det3, fft, fft_real, idct2, ifft, inverse3, mat3_mul, mat3_mul_vec,
-    median, solve3, transpose3,
+    Complex, convolve, correlate, covariance, dct2, dct2_2d, dct3, det3, dtw_distance, fft,
+    fft_arbitrary, fft_real, idct2, ifft, ifft_arbitrary, inverse3, lagrange_eval, lerp, mat3_mul,
+    mat3_mul_vec, mean, median, ransac_line, solve3, transpose3, variance,
 };
 use std::fs;
 use std::process::ExitCode;
@@ -89,7 +90,7 @@ fn compute_vectors() -> Vec<Vector> {
     let out = dct2(&x8);
     v.push(vec1("dct2.n8", false, x8.clone(), out));
     let out = idct2(&dct2(&x8));
-    v.push(vec1("idct2.roundtrip.n8", false, x8, out));
+    v.push(vec1("idct2.roundtrip.n8", false, x8.clone(), out));
 
     let x32 = lcg_input(32, 37, 32, 0.125, 2.0);
     let out = dct2(&x32);
@@ -264,6 +265,227 @@ fn compute_vectors() -> Vec<Vector> {
         true,
         flat3x3(&t),
         flat3x3(&transpose3(&t)),
+    ));
+
+    // -- Complex arithmetic (tier 1) ------------------------------------
+    // (3+2i)(1−4i) = 11−10i: integer product, every partial sum exactly
+    // representable — bit-for-bit.
+    v.push(vec1(
+        "complex.mul.exact",
+        true,
+        vec![3.0, 2.0, 1.0, -4.0],
+        vec![11.0, -10.0],
+    ));
+    // (5+i)/(1−i) = 2+3i: Smith's scaling on a denominator of 2 — exact.
+    v.push(vec1(
+        "complex.div.exact",
+        true,
+        vec![5.0, 1.0, 1.0, -1.0],
+        vec![2.0, 3.0],
+    ));
+    // e^(iπ) = −1: the Euler identity. The real part is exact; the
+    // imaginary part is sin(π_f64) — platform-libm shaped, approx.
+    let eulers = Complex::new(0.0, core::f64::consts::PI).exp();
+    v.push(vec1(
+        "complex.exp.i.pi",
+        false,
+        vec![0.0, core::f64::consts::PI],
+        vec![eulers.re, eulers.im],
+    ));
+    // sqrt(i) = (1+i)/√2: irrational, approx.
+    let s = Complex::new(0.0, 1.0).sqrt();
+    v.push(vec1(
+        "complex.sqrt.i",
+        false,
+        vec![0.0, 1.0],
+        vec![s.re, s.im],
+    ));
+    // (1+i)^4 = −4: integer power by squaring on integers — exact.
+    let p = Complex::new(1.0, 1.0).powi(4);
+    v.push(vec1(
+        "complex.powi.exact",
+        true,
+        vec![1.0, 1.0],
+        vec![p.re, p.im],
+    ));
+    // arg(1+i) = π/4: atan2 is platform-libm shaped — approx.
+    v.push(vec1(
+        "complex.arg.quarter",
+        false,
+        vec![1.0, 1.0],
+        vec![Complex::new(1.0, 1.0).arg()],
+    ));
+
+    // -- Bluestein (arbitrary-length DFT, tier 1) ------------------------
+    // The prime lengths 17 and 97 are exactly the sizes radix-2 cannot
+    // touch; the angles reduce through t² mod 2n, so the outputs are
+    // still twiddle-shaped — approx.
+    let b17: Vec<f64> = lcg_input(34, 7, 13, 0.25, 1.5);
+    let mut buf = complex(&b17);
+    fft_arbitrary(&mut buf);
+    v.push(Vector {
+        name: "bluestein.n17",
+        exact: false,
+        shape: None,
+        input: b17,
+        output: flat(&buf),
+    });
+    let b97: Vec<f64> = lcg_input(194, 11, 23, 0.125, 2.0);
+    let mut buf = complex(&b97);
+    fft_arbitrary(&mut buf);
+    v.push(Vector {
+        name: "bluestein.n97",
+        exact: false,
+        shape: None,
+        input: b97,
+        output: flat(&buf),
+    });
+    // Arbitrary-length round trip on a non-prime, non-power-of-two n.
+    let b12: Vec<f64> = lcg_input(24, 17, 19, 0.25, 1.0);
+    let mut buf = complex(&b12);
+    fft_arbitrary(&mut buf);
+    ifft_arbitrary(&mut buf);
+    v.push(Vector {
+        name: "bluestein.roundtrip.n12",
+        exact: false,
+        shape: None,
+        input: b12,
+        output: flat(&buf),
+    });
+    // The same 8-pair input as fft.n8 through the Bluestein path: the
+    // two engines must agree within the twiddle budgets.
+    let c8b: Vec<f64> = vec![
+        1.0, 0.5, -0.5, 2.0, 0.25, -1.5, 1.75, 0.0, -2.25, 0.5, 0.125, 3.0, -0.75, 1.0, 2.5, -1.0,
+    ];
+    let mut buf = complex(&c8b);
+    fft_arbitrary(&mut buf);
+    v.push(Vector {
+        name: "bluestein.n8.crosscheck",
+        exact: false,
+        shape: None,
+        input: c8b,
+        output: flat(&buf),
+    });
+
+    // -- DCT-III ----------------------------------------------------------
+    let out = dct3(&x8);
+    v.push(vec1("dct3.n8", false, x8.clone(), out));
+    let out = dct3(&dct2(&x8));
+    v.push(vec1("dct3.roundtrip.n8", false, x8, out));
+
+    // -- conv / corr ------------------------------------------------------
+    // [1,2,3]∗[0,1,2] = [0,1,4,7,6]: the direct definition on integers
+    // — bit-for-bit.
+    v.push(vec1(
+        "conv.small.exact",
+        true,
+        vec![1.0, 2.0, 3.0, 0.0, 1.0, 2.0],
+        convolve(&[1.0, 2.0, 3.0], &[0.0, 1.0, 2.0]),
+    ));
+    // 128×53 operands: work product 6784 > 4096, so this vector rides
+    // the FFT path — twiddle-shaped output, approx.
+    let ca: Vec<f64> = lcg_input(128, 5, 13, 0.25, 1.5);
+    let cb: Vec<f64> = lcg_input(53, 19, 17, 0.5, 2.5);
+    let conv = convolve(&ca, &cb);
+    v.push(Vector {
+        name: "conv.fft.path",
+        exact: false,
+        shape: None,
+        input: ca.iter().copied().chain(cb.iter().copied()).collect(),
+        output: conv,
+    });
+    // [1,2]⋆[3,4] = [4,11,6] on integers — bit-for-bit.
+    v.push(vec1(
+        "corr.small.exact",
+        true,
+        vec![1.0, 2.0, 3.0, 4.0],
+        correlate(&[1.0, 2.0], &[3.0, 4.0]),
+    ));
+
+    // -- stats --------------------------------------------------------------
+    v.push(vec1(
+        "stats.mean.exact",
+        true,
+        vec![1.0, 2.0, 3.0, 4.0],
+        vec![mean(&[1.0, 2.0, 3.0, 4.0]).unwrap()],
+    ));
+    v.push(vec1(
+        "stats.var.sample.exact",
+        true,
+        vec![1.0, 3.0],
+        vec![variance(&[1.0, 3.0]).unwrap()],
+    ));
+    // 5/3 is not a binary rational — approx.
+    v.push(vec1(
+        "stats.var.sample.textbook",
+        false,
+        vec![1.0, 2.0, 3.0, 4.0],
+        vec![variance(&[1.0, 2.0, 3.0, 4.0]).unwrap()],
+    ));
+    v.push(vec1(
+        "stats.cov.sample.exact",
+        true,
+        vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0],
+        vec![covariance(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0]).unwrap()],
+    ));
+
+    // -- interp ----------------------------------------------------------
+    // y = x² + 2x + 1 through (0,1),(1,4),(2,9), evaluated at 1.5 =
+    // 6.25: every basis value dyadic — bit-for-bit. The packed input
+    // carries the node pairs then the abscissa.
+    v.push(vec1(
+        "interp.lagrange.quadratic.exact",
+        true,
+        vec![0.0, 1.0, 1.0, 4.0, 2.0, 9.0, 1.5],
+        vec![lagrange_eval(&[(0.0, 1.0), (1.0, 4.0), (2.0, 9.0)], 1.5).unwrap()],
+    ));
+    v.push(vec1(
+        "interp.lerp.midpoint.exact",
+        true,
+        vec![1.0, 3.0, 0.25],
+        vec![lerp(1.0, 3.0, 0.25)],
+    ));
+
+    // -- RANSAC -----------------------------------------------------------
+    // Four points on y = 0.5x + 1, two gross outliers; the seeded
+    // stream (SplitMix64, seed 42) cannot help but find an inlier pair
+    // whose model is the line itself — dyadic arithmetic, bit-for-bit.
+    let rp: Vec<f64> = vec![0.0, 1.0, 2.0, 2.0, 4.0, 3.0, 6.0, 4.0, 2.0, 10.0, 4.0, -9.0];
+    let fit = ransac_line(
+        &[
+            (0.0, 1.0),
+            (2.0, 2.0),
+            (4.0, 3.0),
+            (6.0, 4.0),
+            (2.0, 10.0),
+            (4.0, -9.0),
+        ],
+        0.5,
+        64,
+        42,
+    )
+    .expect("the seeded fit finds the planted line");
+    v.push(vec1(
+        "ransac.line.fit",
+        true,
+        rp,
+        vec![fit.slope, fit.intercept, fit.inliers as f64],
+    ));
+
+    // -- DTW ---------------------------------------------------------------
+    // The textbook integer cost matrices: local costs |a−b|, optimal
+    // path sums small integers — bit-for-bit.
+    v.push(vec1(
+        "dtw.textbook.3x3",
+        true,
+        vec![1.0, 2.0, 3.0, 2.0, 2.0, 2.0],
+        vec![dtw_distance(&[1.0, 2.0, 3.0], &[2.0, 2.0, 2.0]).unwrap()],
+    ));
+    v.push(vec1(
+        "dtw.textbook.2x3",
+        true,
+        vec![1.0, 3.0, 2.0, 2.0, 4.0],
+        vec![dtw_distance(&[1.0, 3.0], &[2.0, 2.0, 4.0]).unwrap()],
     ));
 
     v.sort_by(|a, b| a.name.cmp(b.name));

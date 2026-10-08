@@ -26,11 +26,19 @@
 
 #![allow(unsafe_code)]
 
+use crate::bluestein::{fft_arbitrary, ifft_arbitrary};
+use crate::complex::Complex;
+use crate::conv::{convolve, correlate};
 use crate::dct::{dct2, dct2_2d, idct2};
-use crate::fft::{Complex, fft, fft_real, ifft};
+use crate::dct3::{dct3, dct3_2d};
+use crate::dtw::dtw_distance;
+use crate::fft::{fft, fft_real, ifft};
+use crate::interp::lagrange_eval;
 use crate::linalg::{det3, inverse3, mat3_mul, mat3_mul_vec, transpose3};
 use crate::median::median_copy;
+use crate::ransac::ransac_line;
 use crate::solve3::solve3;
+use crate::stats::{covariance, mean, variance};
 
 /// Status: success.
 pub const PITH_OK: i32 = 0;
@@ -59,6 +67,49 @@ unsafe fn hand_out(out: *mut *mut f64, out_len: *mut usize, result: Vec<f64>) ->
         *out_len = bytes;
     }
     PITH_OK
+}
+
+/// Null-guard shared by every export: [`PITH_E_INVALID`] when a data
+/// pointer or an out-slot is missing.
+fn null_status(input: *const f64, out: *mut *mut f64, out_len: *mut usize) -> Option<i32> {
+    if input.is_null() || out.is_null() || out_len.is_null() {
+        return Some(PITH_E_INVALID);
+    }
+    None
+}
+
+/// The scalar-out variant of [`null_status`].
+fn null_status_scalar(input: *const f64, out: *mut f64) -> Option<i32> {
+    if input.is_null() || out.is_null() {
+        return Some(PITH_E_INVALID);
+    }
+    None
+}
+
+/// Runs one scalar-out kernel through the validate → compute →
+/// write-slot pipeline shared by every non-allocating export.
+///
+/// # Safety
+///
+/// `input` must point to `in_len` readable `f64`s and `out` to one
+/// writable `f64`; both must stay valid for the duration of the call.
+unsafe fn run_scalar(
+    input: *const f64,
+    in_len: usize,
+    out: *mut f64,
+    kernel: fn(&[f64]) -> Result<f64, i32>,
+) -> i32 {
+    if let Some(status) = null_status_scalar(input, out) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match kernel(x) {
+        Ok(value) => {
+            unsafe { *out = value };
+            PITH_OK
+        }
+        Err(status) => status,
+    }
 }
 
 /// Runs one of the flat-array kernels through the standard
@@ -233,6 +284,193 @@ fn mat3_mul_vec_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
 /// buffer. An empty input is [`PITH_E_INVALID`].
 fn median_core(x: &[f64]) -> Result<f64, i32> {
     median_copy(x).ok_or(PITH_E_INVALID)
+}
+
+// -- Tier-1 cores ------------------------------------------------------
+
+/// The safe core of [`pith_math_fft_n`]: the interleaved-complex
+/// layout with `n = in_len / 2 ≥ 1` — any length, not just powers of
+/// two.
+fn fft_n_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
+    if flat.len() % 2 != 0 || flat.is_empty() {
+        return Err(PITH_E_INVALID);
+    }
+    let mut buf: Vec<Complex> = flat
+        .chunks_exact(2)
+        .map(|c| Complex::new(c[0], c[1]))
+        .collect();
+    fft_arbitrary(&mut buf);
+    Ok(flat_complex(&buf))
+}
+
+/// The safe core of [`pith_math_dct3`].
+fn dct3_core(x: &[f64]) -> Result<Vec<f64>, i32> {
+    if x.is_empty() {
+        return Err(PITH_E_INVALID);
+    }
+    Ok(dct3(x))
+}
+
+/// The safe core of [`pith_math_dct3_2d`]: geometry first, as in
+/// [`dct2_2d_core`].
+fn dct3_2d_core(data: &[f64], w: usize, h: usize) -> Result<Vec<f64>, i32> {
+    if w == 0 || h == 0 || Some(data.len()) != w.checked_mul(h) {
+        return Err(PITH_E_INVALID);
+    }
+    let mut buf = data.to_vec();
+    dct3_2d(&mut buf, w, h);
+    Ok(buf)
+}
+
+/// The safe core of [`pith_math_ifft_n`].
+fn ifft_n_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
+    if flat.len() % 2 != 0 || flat.is_empty() {
+        return Err(PITH_E_INVALID);
+    }
+    let mut buf: Vec<Complex> = flat
+        .chunks_exact(2)
+        .map(|c| Complex::new(c[0], c[1]))
+        .collect();
+    ifft_arbitrary(&mut buf);
+    Ok(flat_complex(&buf))
+}
+
+/// The safe core of [`pith_math_conv`] / [`pith_math_corr`]: one
+/// packed buffer, `a_len` the element count of the first operand.
+fn packed_pair_core(
+    flat: &[f64],
+    a_len: usize,
+    op: fn(&[f64], &[f64]) -> Vec<f64>,
+) -> Result<Vec<f64>, i32> {
+    if a_len == 0 || flat.len() <= a_len {
+        return Err(PITH_E_INVALID);
+    }
+    let (a, b) = flat.split_at(a_len);
+    Ok(op(a, b))
+}
+
+/// The safe core of [`pith_math_mean`].
+fn mean_core(x: &[f64]) -> Result<f64, i32> {
+    mean(x).ok_or(PITH_E_INVALID)
+}
+
+/// The safe core of [`pith_math_var`]: fewer than two observations is
+/// a caller bug.
+fn var_core(x: &[f64]) -> Result<f64, i32> {
+    if x.len() < 2 {
+        return Err(PITH_E_INVALID);
+    }
+    variance(x).ok_or(PITH_E_INVALID)
+}
+
+/// The safe core of [`pith_math_cov`]: one packed buffer split into
+/// two equal-length halves, each of at least two observations.
+fn cov_core(flat: &[f64]) -> Result<f64, i32> {
+    if flat.len() % 2 != 0 || flat.len() < 4 {
+        return Err(PITH_E_INVALID);
+    }
+    let (a, b) = flat.split_at(flat.len() / 2);
+    covariance(a, b).ok_or(PITH_E_INVALID)
+}
+
+/// The safe core of [`pith_math_lagrange`]: `points` packed as
+/// interleaved `(x, y)` pairs plus the evaluation abscissa. Duplicated
+/// abscissae are [`PITH_E_REJECTED`] — degenerate data, not a bug.
+fn lagrange_core(packed: &[f64], x: f64) -> Result<f64, i32> {
+    if packed.len() % 2 != 0 || packed.is_empty() {
+        return Err(PITH_E_INVALID);
+    }
+    let points: Vec<(f64, f64)> = packed.chunks_exact(2).map(|p| (p[0], p[1])).collect();
+    lagrange_eval(&points, x).ok_or(PITH_E_REJECTED)
+}
+
+/// The safe core of [`pith_math_dtw`]: packed sequences split at
+/// `a_len`, both non-empty.
+fn dtw_core(packed: &[f64], a_len: usize) -> Result<f64, i32> {
+    if a_len == 0 || packed.len() <= a_len {
+        return Err(PITH_E_INVALID);
+    }
+    let (a, b) = packed.split_at(a_len);
+    dtw_distance(a, b).ok_or(PITH_E_INVALID)
+}
+
+/// The safe core of [`pith_math_ransac_line`]: points packed as
+/// interleaved `(x, y)` pairs. Configuration errors are
+/// [`PITH_E_INVALID`]; a run that found no model at all (every sample
+/// degenerate) is [`PITH_E_REJECTED`].
+#[allow(clippy::too_many_arguments)]
+fn ransac_core(
+    packed: &[f64],
+    threshold: f64,
+    iterations: usize,
+    seed: u64,
+) -> Result<Vec<f64>, i32> {
+    if packed.len() < 4 || packed.len() % 2 != 0 {
+        return Err(PITH_E_INVALID);
+    }
+    let points: Vec<(f64, f64)> = packed.chunks_exact(2).map(|p| (p[0], p[1])).collect();
+    if points.len() < 2 || iterations == 0 || threshold.is_nan() || threshold <= 0.0 {
+        return Err(PITH_E_INVALID);
+    }
+    ransac_line(&points, threshold, iterations, seed)
+        .map(|fit| vec![fit.slope, fit.intercept, fit.inliers as f64])
+        .ok_or(PITH_E_REJECTED)
+}
+
+/// The safe core of the unary complex ops ([`pith_math_complex_exp`],
+/// [`pith_math_complex_sqrt`]): exactly one interleaved pair in, one
+/// pair out.
+fn complex_unary_core(flat: &[f64], op: fn(Complex) -> Complex) -> Result<Vec<f64>, i32> {
+    if flat.len() != 2 {
+        return Err(PITH_E_INVALID);
+    }
+    let z = op(Complex::new(flat[0], flat[1]));
+    Ok(vec![z.re, z.im])
+}
+
+/// The safe core of [`pith_math_complex_mul`]: exactly two interleaved
+/// pairs in.
+fn complex_mul_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
+    complex_binary_core(flat, |a, b| a * b)
+}
+
+/// The safe core of [`pith_math_complex_div`]: a zero denominator is
+/// [`PITH_E_REJECTED`] — the domain refusal, like a singular matrix.
+fn complex_div_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
+    if flat.len() == 4 && flat[2] == 0.0 && flat[3] == 0.0 {
+        return Err(PITH_E_REJECTED);
+    }
+    complex_binary_core(flat, |a, b| a / b)
+}
+
+/// The safe core of the binary complex ops ([`pith_math_complex_mul`],
+/// [`pith_math_complex_div`]): exactly two interleaved pairs in.
+fn complex_binary_core(flat: &[f64], op: fn(Complex, Complex) -> Complex) -> Result<Vec<f64>, i32> {
+    if flat.len() != 4 {
+        return Err(PITH_E_INVALID);
+    }
+    let z = op(
+        Complex::new(flat[0], flat[1]),
+        Complex::new(flat[2], flat[3]),
+    );
+    Ok(vec![z.re, z.im])
+}
+
+/// The safe core of [`pith_math_complex_powi`].
+fn complex_powi_core(flat: &[f64], n: usize) -> Result<Vec<f64>, i32> {
+    if flat.len() != 2 || n > i32::MAX as usize {
+        return Err(PITH_E_INVALID);
+    }
+    let z = Complex::new(flat[0], flat[1]).powi(n as i32);
+    Ok(vec![z.re, z.im])
+}
+
+/// The safe core of [`pith_math_complex_arg`].
+fn complex_arg_core(flat: &[f64]) -> Result<f64, i32> {
+    if flat.len() != 2 {
+        return Err(PITH_E_INVALID);
+    }
+    Ok(Complex::new(flat[0], flat[1]).arg())
 }
 
 /// 1D orthonormal DCT-II of `in_len` `f64`s.
@@ -483,6 +721,391 @@ pub unsafe extern "C" fn pith_math_median(input: *const f64, in_len: usize, out:
         }
         Err(status) => status,
     }
+}
+
+/// Arbitrary-length forward DFT (Bluestein chirp-z) over `in_len / 2`
+/// interleaved complex pairs, output in the same layout.
+///
+/// `n = in_len / 2` must be at least 1 — **any** length is legal, the
+/// power-of-two restriction of [`pith_math_fft`] does not apply here.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_fft_n(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, fft_n_core) }
+}
+
+/// 1D orthonormal DCT-III — the first-class forward transform whose
+/// inverse is [`pith_math_dct2`], under the same ownership and
+/// validation contract as [`pith_math_idct2`].
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_dct3(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, dct3_core) }
+}
+
+/// 2D orthonormal DCT-III over a `w × h` row-major matrix — the exact
+/// inverse of [`pith_math_dct2_2d`], same geometry contract.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_dct3_2d(
+    input: *const f64,
+    in_len: usize,
+    w: usize,
+    h: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    if input.is_null() || out.is_null() || out_len.is_null() {
+        return PITH_E_INVALID;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match dct3_2d_core(x, w, h) {
+        Ok(result) => unsafe { hand_out(out, out_len, result) },
+        Err(status) => status,
+    }
+}
+
+/// Inverse of [`pith_math_fft_n`]: any `n ≥ 1`, conjugate-normalized.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_ifft_n(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, ifft_n_core) }
+}
+
+/// Full-support linear convolution of the packed operands: `input`
+/// carries `a` (`a_len` elements) followed by `b`; the fresh result
+/// holds `a_len + b_len − 1` samples. Empty operands and `a_len == 0`
+/// are [`PITH_E_INVALID`].
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_conv(
+    input: *const f64,
+    in_len: usize,
+    a_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    if let Some(status) = null_status(input, out, out_len) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match packed_pair_core(x, a_len, convolve) {
+        Ok(result) => unsafe { hand_out(out, out_len, result) },
+        Err(status) => status,
+    }
+}
+
+/// Full-support cross-correlation of the packed operands —
+/// [`pith_math_conv`] against the reversed second operand — under the
+/// same packing and ownership contract.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_corr(
+    input: *const f64,
+    in_len: usize,
+    a_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    if let Some(status) = null_status(input, out, out_len) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match packed_pair_core(x, a_len, correlate) {
+        Ok(result) => unsafe { hand_out(out, out_len, result) },
+        Err(status) => status,
+    }
+}
+
+/// Arithmetic mean of `in_len` `f64`s, through the scalar `out` slot.
+/// An empty input is [`PITH_E_INVALID`].
+///
+/// # Safety
+///
+/// `input` must point to `in_len` readable `f64`s and `out` to one
+/// writable `f64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_mean(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
+    unsafe { run_scalar(input, in_len, out, mean_core) }
+}
+
+/// Sample variance (the `n − 1` denominator) of `in_len` `f64`s.
+/// Fewer than two observations is [`PITH_E_INVALID`].
+///
+/// # Safety
+///
+/// See [`pith_math_mean`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_var(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
+    unsafe { run_scalar(input, in_len, out, var_core) }
+}
+
+/// Sample covariance of two equal-length series packed back to back
+/// in `input` (each half at least two observations), through the
+/// scalar `out` slot. A zero-mean-cut layout (`in_len` odd) or short
+/// halves is [`PITH_E_INVALID`].
+///
+/// # Safety
+///
+/// See [`pith_math_mean`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_cov(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
+    unsafe { run_scalar(input, in_len, out, cov_core) }
+}
+
+/// Evaluates the Lagrange interpolant through the packed `(x, y)`
+/// pairs in `input` at the abscissa `x`, through the scalar `out`
+/// slot. Duplicated abscissae are [`PITH_E_REJECTED`].
+///
+/// # Safety
+///
+/// `input` must point to `in_len` readable `f64`s (an even count, the
+/// interleaved pairs) and `out` to one writable `f64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_lagrange(
+    input: *const f64,
+    in_len: usize,
+    x: f64,
+    out: *mut f64,
+) -> i32 {
+    if let Some(status) = null_status_scalar(input, out) {
+        return status;
+    }
+    let pts = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match lagrange_core(pts, x) {
+        Ok(value) => {
+            unsafe { *out = value };
+            PITH_OK
+        }
+        Err(status) => status,
+    }
+}
+
+/// DTW distance between the packed sequences `a` (`a_len` elements)
+/// followed by `b`, through the scalar `out` slot. Empty operands are
+/// [`PITH_E_INVALID`].
+///
+/// # Safety
+///
+/// See [`pith_math_mean`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_dtw(
+    input: *const f64,
+    in_len: usize,
+    a_len: usize,
+    out: *mut f64,
+) -> i32 {
+    if let Some(status) = null_status_scalar(input, out) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match dtw_core(x, a_len) {
+        Ok(value) => {
+            unsafe { *out = value };
+            PITH_OK
+        }
+        Err(status) => status,
+    }
+}
+
+/// Seeded RANSAC line fit over the packed `(x, y)` points in `input`:
+/// `iterations` two-point samples under the inlier `threshold`,
+/// driven by the `seed`ed SplitMix64 stream. On success the fresh
+/// 3-element result carries `[slope, intercept, inlier_count]`.
+///
+/// Degenerate configuration (`in_len < 4`, odd, zero iterations,
+/// `threshold ≤ 0`) is [`PITH_E_INVALID`]; a run that found no model
+/// at all is [`PITH_E_REJECTED`]. Seeded runs replay bit-for-bit on
+/// every platform.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_ransac_line(
+    input: *const f64,
+    in_len: usize,
+    threshold: f64,
+    iterations: usize,
+    seed: u64,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    if let Some(status) = null_status(input, out, out_len) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match ransac_core(x, threshold, iterations, seed) {
+        Ok(result) => unsafe { hand_out(out, out_len, result) },
+        Err(status) => status,
+    }
+}
+
+/// Complex product of the two interleaved pairs in `input`, as a
+/// fresh interleaved pair.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_mul(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, complex_mul_core) }
+}
+
+/// Complex quotient (Smith's algorithm) of the two interleaved pairs
+/// in `input`, as a fresh interleaved pair.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_div(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, complex_div_core) }
+}
+
+/// Complex exponential `e^z` of the interleaved pair in `input`.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_exp(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe {
+        run_alloc(input, in_len, out, out_len, |f| {
+            complex_unary_core(f, Complex::exp)
+        })
+    }
+}
+
+/// Principal square root of the interleaved pair in `input`.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_sqrt(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe {
+        run_alloc(input, in_len, out, out_len, |f| {
+            complex_unary_core(f, Complex::sqrt)
+        })
+    }
+}
+
+/// The safe core of [`pith_math_complex_log`]: `z = 0` is
+/// [`PITH_E_REJECTED`] (outside the principal-branch domain).
+fn complex_log_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
+    if flat.len() == 2 && flat[0] == 0.0 && flat[1] == 0.0 {
+        return Err(PITH_E_REJECTED);
+    }
+    complex_unary_core(flat, Complex::ln)
+}
+
+/// Principal natural logarithm `[ln|z|, arg z]` of the interleaved
+/// pair in `input`; `z = 0` is [`PITH_E_REJECTED`] (domain refusal).
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_log(
+    input: *const f64,
+    in_len: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    unsafe { run_alloc(input, in_len, out, out_len, complex_log_core) }
+}
+
+/// Integer power `z^n` of the interleaved pair in `input`, by
+/// squaring, as a fresh interleaved pair.
+///
+/// # Safety
+///
+/// See [`pith_math_dct2`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_powi(
+    input: *const f64,
+    in_len: usize,
+    n: usize,
+    out: *mut *mut f64,
+    out_len: *mut usize,
+) -> i32 {
+    if let Some(status) = null_status(input, out, out_len) {
+        return status;
+    }
+    let x = unsafe { core::slice::from_raw_parts(input, in_len) };
+    match complex_powi_core(x, n) {
+        Ok(result) => unsafe { hand_out(out, out_len, result) },
+        Err(status) => status,
+    }
+}
+
+/// Principal argument `arg z ∈ (−π, π]` of the interleaved pair in
+/// `input`, through the scalar `out` slot.
+///
+/// # Safety
+///
+/// See [`pith_math_mean`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pith_math_complex_arg(
+    input: *const f64,
+    in_len: usize,
+    out: *mut f64,
+) -> i32 {
+    unsafe { run_scalar(input, in_len, out, complex_arg_core) }
 }
 
 /// Releases a buffer handed out by any allocating export of this

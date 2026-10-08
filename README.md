@@ -1,18 +1,32 @@
 # `pith-math`
 
-FFT, DCT-II, median, 3x3 solve and small linear algebra.
+FFT, DCT, complex arithmetic, convolution, statistics, interpolation,
+RANSAC, DTW, median, 3x3 solve and small linear algebra.
 
-**Status: implemented.** Complex + real FFT (radix-2, in place),
-orthonormal DCT-II/DCT-III (1D and separable 2D — the direct O(N²)
-definition, deliberately; see `src/dct.rs`), median (**lower-middle**
-convention for even lengths, documented in `src/median.rs`), `solve3`
-(partial-pivot Gaussian elimination), and 3×3 helpers (`det3`,
-`mat3_mul`, `mat3_mul_vec`, `transpose3`, `inverse3`). The crate is
-`std` (`sin`/`cos` are not in `core`) but allocates only through `Vec`
-at API boundaries.
+**Status: implemented.** Complex + real FFT (radix-2, in place) plus
+the arbitrary-length Bluestein engine (`fft_n`/`ifft_n`, any `n ≥ 1`),
+complex arithmetic over `f64` (Smith-scaled division, principal-branch
+`sqrt`/`ln`/`powf`/`arg`, integer `powi`), orthonormal DCT-II/DCT-III
+(1D and separable 2D — the direct O(N²) definition, deliberately; see
+`src/dct.rs`/`src/dct3.rs`), full-support `conv`/`corr` (direct below
+the FFT crossover, FFT above), sample statistics (`mean`, `variance`,
+`std_dev`, `covariance`), interpolation (`lerp`, Lagrange), seeded
+RANSAC line fitting (SplitMix64-driven, bit-for-bit replayable), DTW
+distance, median (**lower-middle** convention for even lengths,
+documented in `src/median.rs`), `solve3` (partial-pivot Gaussian
+elimination), and 3×3 helpers (`det3`, `mat3_mul`, `mat3_mul_vec`,
+`transpose3`, `inverse3`). The crate is `std` (`sin`/`cos` are not in
+`core`) but allocates only through `Vec` at API boundaries.
 
-Ported verbatim from the `modhash` kit's `modhash-math` crate; the
-numeric behaviour, public API and conformance tests are unchanged.
+Ported verbatim from the `modhash` kit's `modhash-math` crate; that
+numeric behaviour, public API and conformance tests are unchanged. The
+tier-1 expansion modules (`complex`, `bluestein`, `dct3`, `conv`,
+`stats`, `interp`, `ransac`, `dtw`) are new implementations in this
+crate, each carrying its own acceptance tests and reference vectors.
+
+Language bindings live under `sdk/` — Python (ctypes), Node (koffi),
+Go (cgo/syscall) and Java (JNI, class `pith.math.PithMath`) — all
+replaying the same hex-exact vectors.
 
 ## Reference vectors
 

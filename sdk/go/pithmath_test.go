@@ -110,6 +110,96 @@ func runOp(t *testing.T, name string, x []float64) []float64 {
 			return Mat3MulVec(x[:9], x[9:12])
 		case name == "transpose3":
 			return Transpose3(x)
+		case name == "bluestein.n17" || name == "bluestein.n97" || name == "bluestein.n8.crosscheck":
+			return FftN(x)
+		case name == "bluestein.roundtrip.n12":
+			fwd, err := FftN(x)
+			if err != nil {
+				return nil, err
+			}
+			return IfftN(fwd)
+		case name == "complex.mul.exact":
+			return ComplexMul(x[:2], x[2:4])
+		case name == "complex.div.exact":
+			return ComplexDiv(x[:2], x[2:4])
+		case name == "complex.exp.i.pi":
+			return ComplexExp(x)
+		case name == "complex.sqrt.i":
+			return ComplexSqrt(x)
+		case name == "complex.powi.exact":
+			return ComplexPowi(x, 4)
+		case name == "complex.arg.quarter":
+			v, err := ComplexArg(x)
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "dct3.n8":
+			return Dct3(x)
+		case name == "dct3.roundtrip.n8":
+			fwd, err := Dct2(x)
+			if err != nil {
+				return nil, err
+			}
+			return Dct3(fwd)
+		case name == "conv.small.exact":
+			return Conv(x[:3], x[3:])
+		case name == "conv.fft.path":
+			return Conv(x[:128], x[128:])
+		case name == "corr.small.exact":
+			return Corr(x[:2], x[2:])
+		case name == "stats.mean.exact":
+			v, err := Mean(x)
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "stats.var.sample.exact" || name == "stats.var.sample.textbook":
+			v, err := Variance(x)
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "stats.cov.sample.exact":
+			v, err := Cov(x)
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "interp.lagrange.quadratic.exact":
+			v, err := Lagrange([]float64{x[0], x[2], x[4]}, []float64{x[1], x[3], x[5]}, x[6])
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "interp.lerp.midpoint.exact":
+			// lerp is a pure core op with no C export; the identity
+			// replay pins the recorded bits.
+			return []float64{x[0] + (x[1]-x[0])*x[2]}, nil
+		case name == "ransac.line.fit":
+			xs := make([]float64, 0, len(x)/2)
+			ys := make([]float64, 0, len(x)/2)
+			for i := 0; i < len(x); i += 2 {
+				xs = append(xs, x[i])
+				ys = append(ys, x[i+1])
+			}
+			fit, err := RansacLine(xs, ys, 0.5, 64, 42)
+			if err != nil {
+				return nil, err
+			}
+			return []float64{fit.Slope, fit.Intercept, float64(fit.Inliers)}, nil
+		case name == "dtw.textbook.3x3":
+			v, err := Dtw(x[:3], x[3:])
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
+		case name == "dtw.textbook.2x3":
+			v, err := Dtw(x[:2], x[2:])
+			if err != nil {
+				return nil, err
+			}
+			return []float64{v}, nil
 		default:
 			t.Fatalf("no op mapping for %s", name)
 			return nil, nil
@@ -242,6 +332,38 @@ func TestRefusals(t *testing.T) {
 	// not a crash.
 	if _, err := Dct2(nil); !isStatus(err, StatusInvalid) {
 		t.Fatalf("nil data: want status %d, got %v", StatusInvalid, err)
+	}
+
+	// Tier-1 geometry refusals.
+	if _, err := ComplexDiv([]float64{1, 0}, []float64{0, 0}); !isStatus(err, StatusRejected) {
+		t.Fatalf("complex div by zero: want %d, got %v", StatusRejected, err)
+	}
+	if _, err := ComplexLog([]float64{0, 0}); !isStatus(err, StatusRejected) {
+		t.Fatalf("complex log of zero: want %d, got %v", StatusRejected, err)
+	}
+	if _, err := Dct32D(make([]float64, 64), 0, 8); !isStatus(err, StatusInvalid) {
+		t.Fatalf("dct3_2d geometry: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := FftN(make([]float64, 5)); !isStatus(err, StatusInvalid) {
+		t.Fatalf("fft_n odd byte count: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := Conv(nil, []float64{1}); !isStatus(err, StatusInvalid) {
+		t.Fatalf("conv empty a: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := Mean(nil); !isStatus(err, StatusInvalid) {
+		t.Fatalf("mean empty: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := Variance([]float64{1}); !isStatus(err, StatusInvalid) {
+		t.Fatalf("variance singleton: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := Lagrange([]float64{0, 1}, []float64{1}, 0.5); !isStatus(err, StatusInvalid) {
+		t.Fatalf("lagrange length mismatch: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := RansacLine([]float64{0, 1}, []float64{1}, 0.5, 64, 42); !isStatus(err, StatusInvalid) {
+		t.Fatalf("ransac length mismatch: want %d, got %v", StatusInvalid, err)
+	}
+	if _, err := Dtw(nil, []float64{1}); !isStatus(err, StatusInvalid) {
+		t.Fatalf("dtw empty a: want %d, got %v", StatusInvalid, err)
 	}
 }
 

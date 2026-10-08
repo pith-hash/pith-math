@@ -17,21 +17,43 @@ const path = require("node:path");
 
 const {
   FfiError,
+  complex_arg,
+  complex_div,
+  complex_exp,
+  complex_mul,
+  complex_powi,
+  complex_sqrt,
+  conv,
+  corr,
+  cov,
   dct2,
   dct2_2d,
+  dct3,
   det3,
+  dtw,
   fft,
+  fft_n,
   fft_real,
   findCdylib,
   idct2,
   ifft,
+  ifft_n,
   inverse3,
+  lagrange,
   mat3_mul,
   mat3_mul_vec,
+  mean,
   median,
+  ransac_line,
   solve3,
   transpose3,
+  variance,
 } = require("../index.js");
+
+/** The same linear interpolation the core exposes (not an FFI op). */
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
@@ -64,6 +86,36 @@ function runOp(name, x) {
   if (name === "mat3.mul") return mat3_mul(x.slice(0, 9), x.slice(9, 18));
   if (name === "mat3.mul_vec.rot90") return mat3_mul_vec(x.slice(0, 9), x.slice(9, 12));
   if (name === "transpose3") return transpose3(x);
+  if (name === "bluestein.n17" || name === "bluestein.n97" || name === "bluestein.n8.crosscheck") {
+    return fft_n(x);
+  }
+  if (name === "bluestein.roundtrip.n12") return ifft_n(fft_n(x));
+  if (name === "complex.mul.exact") return complex_mul(x.slice(0, 2), x.slice(2, 4));
+  if (name === "complex.div.exact") return complex_div(x.slice(0, 2), x.slice(2, 4));
+  if (name === "complex.exp.i.pi") return complex_exp(x);
+  if (name === "complex.sqrt.i") return complex_sqrt(x);
+  if (name === "complex.powi.exact") return complex_powi(x, 4);
+  if (name === "complex.arg.quarter") return [complex_arg(x)];
+  if (name === "dct3.n8") return dct3(x);
+  if (name === "dct3.roundtrip.n8") return dct3(dct2(x));
+  if (name === "conv.small.exact") return conv(x.slice(0, 3), x.slice(3));
+  if (name === "conv.fft.path") return conv(x.slice(0, 128), x.slice(128));
+  if (name === "corr.small.exact") return corr(x.slice(0, 2), x.slice(2));
+  if (name === "stats.mean.exact") return [mean(x)];
+  if (name === "stats.var.sample.exact" || name === "stats.var.sample.textbook") {
+    return [variance(x)];
+  }
+  if (name === "stats.cov.sample.exact") return [cov(x)];
+  if (name === "interp.lagrange.quadratic.exact") {
+    return [lagrange(x.filter((_, i) => i % 2 === 0 && i < 6), x.filter((_, i) => i % 2 === 1 && i < 6), x[6])];
+  }
+  if (name === "interp.lerp.midpoint.exact") return [lerp(x[0], x[1], x[2])];
+  if (name === "ransac.line.fit") {
+    const fit = ransac_line(x.filter((_, i) => i % 2 === 0), x.filter((_, i) => i % 2 === 1), 0.5, 64, 42);
+    return [fit[0], fit[1], fit[2]];
+  }
+  if (name === "dtw.textbook.3x3") return [dtw(x.slice(0, 3), x.slice(3))];
+  if (name === "dtw.textbook.2x3") return [dtw(x.slice(0, 2), x.slice(2))];
   throw new Error(`no op mapping for ${name}`);
 }
 

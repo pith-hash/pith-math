@@ -131,6 +131,73 @@ func takeBuffer(libPath string, out *byte, outLen uintptr) []float64 {
 	return buf
 }
 
+// callAllocLen is callAlloc with one extra size_t argument (the packed
+// pair split, the integer power exponent).
+func callAllocLen(op string, x []float64, extra int) ([]float64, error) {
+	libPath, err := locate()
+	if err != nil {
+		return nil, err
+	}
+	var dataPtr *float64
+	if len(x) > 0 {
+		dataPtr = &x[0]
+	}
+	var out *byte
+	var outLen uintptr
+	status, err := ffiAllocLen(libPath, op, dataPtr, len(x), extra, &out, &outLen)
+	if err != nil {
+		return nil, err
+	}
+	if status != StatusOK {
+		return nil, &FfiError{Op: op, Status: status}
+	}
+	return takeBuffer(libPath, out, outLen), nil
+}
+
+// callScalarLen is callScalar with one extra size_t argument (dtw's
+// sequence split).
+func callScalarLen(op string, x []float64, aLen int) (float64, error) {
+	libPath, err := locate()
+	if err != nil {
+		return 0, err
+	}
+	var dataPtr *float64
+	if len(x) > 0 {
+		dataPtr = &x[0]
+	}
+	var slot float64
+	status, err := ffiScalarLen(libPath, op, dataPtr, len(x), aLen, &slot)
+	if err != nil {
+		return 0, err
+	}
+	if status != StatusOK {
+		return 0, &FfiError{Op: op, Status: status}
+	}
+	return slot, nil
+}
+
+// callScalarArg is callScalar with one extra f64 argument (lagrange's
+// evaluation abscissa).
+func callScalarArg(op string, x []float64, arg float64) (float64, error) {
+	libPath, err := locate()
+	if err != nil {
+		return 0, err
+	}
+	var dataPtr *float64
+	if len(x) > 0 {
+		dataPtr = &x[0]
+	}
+	var slot float64
+	status, err := ffiScalarArg(libPath, op, dataPtr, len(x), arg, &slot)
+	if err != nil {
+		return 0, err
+	}
+	if status != StatusOK {
+		return 0, &FfiError{Op: op, Status: status}
+	}
+	return slot, nil
+}
+
 // callScalar runs one scalar-out op.
 func callScalar(op string, x []float64) (float64, error) {
 	libPath, err := locate()
@@ -274,4 +341,176 @@ func Mat3MulVec(m, v []float64) ([]float64, error) {
 // StatusInvalid.
 func Median(x []float64) (float64, error) {
 	return callScalar("pith_math_median", x)
+}
+
+// LineFit is a seeded RANSAC result: the model `y = slope·x +
+// intercept` and the count of points within the threshold.
+type LineFit struct {
+	Slope     float64
+	Intercept float64
+	Inliers   int
+}
+
+// packPoints interleaves (xs[i], ys[i]) into the packed point buffer
+// the RANSAC ABI carries.
+func packPoints(xs, ys []float64) []float64 {
+	packed := make([]float64, 0, 2*len(xs))
+	for i := range xs {
+		packed = append(packed, xs[i], ys[i])
+	}
+	return packed
+}
+
+// ComplexMul computes the complex product of two interleaved pairs
+// [re, im].
+func ComplexMul(z, w []float64) ([]float64, error) {
+	flat := make([]float64, 0, len(z)+len(w))
+	flat = append(flat, z...)
+	flat = append(flat, w...)
+	return callAlloc("pith_math_complex_mul", flat)
+}
+
+// ComplexDiv computes the complex quotient z/w (Smith's scaled
+// algorithm); a zero denominator is StatusRejected.
+func ComplexDiv(z, w []float64) ([]float64, error) {
+	flat := make([]float64, 0, len(z)+len(w))
+	flat = append(flat, z...)
+	flat = append(flat, w...)
+	return callAlloc("pith_math_complex_div", flat)
+}
+
+// ComplexExp computes e^z for the interleaved pair z.
+func ComplexExp(z []float64) ([]float64, error) {
+	return callAlloc("pith_math_complex_exp", z)
+}
+
+// ComplexLog computes the principal natural logarithm [ln|z|, arg z];
+// z = 0 is StatusRejected.
+func ComplexLog(z []float64) ([]float64, error) {
+	return callAlloc("pith_math_complex_log", z)
+}
+
+// ComplexSqrt computes the principal square root of the interleaved
+// pair z.
+func ComplexSqrt(z []float64) ([]float64, error) {
+	return callAlloc("pith_math_complex_sqrt", z)
+}
+
+// ComplexPowi computes z^n by exponentiation-by-squaring (n may be
+// negative: the reciprocal through n's absolute value, per the C
+// surface's usize exponent).
+func ComplexPowi(z []float64, n int) ([]float64, error) {
+	return callAllocLen("pith_math_complex_powi", z, n)
+}
+
+// ComplexArg returns the principal argument of z in radians, (−π, π].
+func ComplexArg(z []float64) (float64, error) {
+	return callScalar("pith_math_complex_arg", z)
+}
+
+// FftN computes the forward DFT of any n ≥ 1 (Bluestein below the
+// radix-2 sizes) over interleaved complex pairs.
+func FftN(x []float64) ([]float64, error) {
+	return callAlloc("pith_math_fft_n", x)
+}
+
+// IfftN computes the inverse of FftN.
+func IfftN(x []float64) ([]float64, error) {
+	return callAlloc("pith_math_ifft_n", x)
+}
+
+// Dct3 computes the 1D orthonormal DCT-III — the exact inverse
+// (transposed kernel) of Dct2.
+func Dct3(x []float64) ([]float64, error) {
+	return callAlloc("pith_math_dct3", x)
+}
+
+// Dct32D computes the separable 2D orthonormal DCT-III over a w×h
+// row-major matrix; the exact inverse of Dct22D.
+func Dct32D(x []float64, w, h int) ([]float64, error) {
+	return callAlloc2d("pith_math_dct3_2d", x, w, h)
+}
+
+// Conv computes the full-support linear convolution of x with k —
+// len(x)+len(k)−1 samples (direct below the FFT crossover).
+func Conv(x, k []float64) ([]float64, error) {
+	flat := make([]float64, 0, len(x)+len(k))
+	flat = append(flat, x...)
+	flat = append(flat, k...)
+	return callAllocLen("pith_math_conv", flat, len(x))
+}
+
+// Corr computes the cross-correlation — Conv with the flipped kernel.
+func Corr(x, k []float64) ([]float64, error) {
+	flat := make([]float64, 0, len(x)+len(k))
+	flat = append(flat, x...)
+	flat = append(flat, k...)
+	return callAllocLen("pith_math_corr", flat, len(x))
+}
+
+// Mean returns the arithmetic mean; an empty input is StatusInvalid.
+func Mean(x []float64) (float64, error) {
+	return callScalar("pith_math_mean", x)
+}
+
+// Variance returns the sample variance (the n−1 denominator); fewer
+// than two observations is StatusInvalid.
+func Variance(x []float64) (float64, error) {
+	return callScalar("pith_math_var", x)
+}
+
+// Cov returns the sample covariance of interleaved pairs; fewer than
+// two pairs is StatusInvalid.
+func Cov(x []float64) (float64, error) {
+	return callScalar("pith_math_cov", x)
+}
+
+// Lagrange evaluates the Lagrange interpolant through (xs[i], ys[i])
+// at x. Duplicate abscissae are StatusRejected.
+func Lagrange(xs, ys []float64, x float64) (float64, error) {
+	if len(xs) != len(ys) {
+		return 0, &FfiError{Op: "pith_math_lagrange", Status: StatusInvalid}
+	}
+	return callScalarArg("pith_math_lagrange", packPoints(xs, ys), x)
+}
+
+// RansacLine fits y = slope·x + intercept through seeded RANSAC:
+// iterations two-point samples under the inlier threshold, driven by
+// the seeded SplitMix64 stream. A run that found no model at all is
+// StatusRejected.
+func RansacLine(xs, ys []float64, threshold float64, iterations int, seed uint64) (*LineFit, error) {
+	if len(xs) != len(ys) {
+		return nil, &FfiError{Op: "pith_math_ransac_line", Status: StatusInvalid}
+	}
+	libPath, err := locate()
+	if err != nil {
+		return nil, err
+	}
+	packed := packPoints(xs, ys)
+	var dataPtr *float64
+	if len(packed) > 0 {
+		dataPtr = &packed[0]
+	}
+	var out *byte
+	var outLen uintptr
+	status, err := ffiRansac(libPath, "pith_math_ransac_line", dataPtr, len(packed),
+		threshold, iterations, seed, &out, &outLen)
+	if err != nil {
+		return nil, err
+	}
+	if status != StatusOK {
+		return nil, &FfiError{Op: "pith_math_ransac_line", Status: status}
+	}
+	buf := takeBuffer(libPath, out, outLen)
+	return &LineFit{Slope: buf[0], Intercept: buf[1], Inliers: int(buf[2])}, nil
+}
+
+// Dtw computes the dynamic time warping distance between a and b
+// (absolute-difference local cost, three monotone steps, optimal
+// path, no window constraint); an empty operand is StatusInvalid.
+func Dtw(a, b []float64) (float64, error) {
+	flat := make([]float64, 0, len(a)+len(b))
+	flat = append(flat, a...)
+	flat = append(flat, b...)
+	return callScalarLen("pith_math_dtw", flat, len(a))
 }

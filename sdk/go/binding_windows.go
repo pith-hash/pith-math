@@ -7,6 +7,7 @@ package pithmath
 
 import (
 	"fmt"
+	"math"
 	"syscall"
 	"unsafe"
 )
@@ -91,6 +92,94 @@ func ffiScalar(libPath, op string, data *float64, n int, out *float64) (int32, e
 		uintptr(unsafe.Pointer(&slot)),
 	)
 	*out = slot
+	return int32(rc), nil
+}
+
+// ffiAllocLen is ffiAlloc with one extra size_t argument (conv/corr's
+// a_len, complex_powi's exponent).
+func ffiAllocLen(libPath, op string, data *float64, n, extra int, out **byte, outLen *uintptr) (int32, error) {
+	proc, release, err := openProc(libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	var cOut *byte
+	var cLen uintptr
+	rc, _, _ := syscall.SyscallN(proc,
+		uintptr(unsafe.Pointer(data)),
+		uintptr(n),
+		uintptr(extra),
+		uintptr(unsafe.Pointer(&cOut)),
+		uintptr(unsafe.Pointer(&cLen)),
+	)
+	*out = cOut
+	*outLen = cLen
+	return int32(rc), nil
+}
+
+// ffiScalarLen is ffiScalar with one extra size_t argument (dtw's
+// a_len split).
+func ffiScalarLen(libPath, op string, data *float64, n, aLen int, out *float64) (int32, error) {
+	proc, release, err := openProc(libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	var slot float64
+	rc, _, _ := syscall.SyscallN(proc,
+		uintptr(unsafe.Pointer(data)),
+		uintptr(n),
+		uintptr(aLen),
+		uintptr(unsafe.Pointer(&slot)),
+	)
+	*out = slot
+	return int32(rc), nil
+}
+
+// ffiScalarArg is ffiScalar with one extra f64 argument (lagrange's
+// evaluation abscissa).
+func ffiScalarArg(libPath, op string, data *float64, n int, arg float64, out *float64) (int32, error) {
+	proc, release, err := openProc(libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	var slot float64
+	rc, _, _ := syscall.SyscallN(proc,
+		uintptr(unsafe.Pointer(data)),
+		uintptr(n),
+		uintptr(math.Float64bits(arg)),
+		uintptr(unsafe.Pointer(&slot)),
+	)
+	*out = slot
+	return int32(rc), nil
+}
+
+// ffiRansac runs the seeded RANSAC line fit: threshold, iterations and
+// seed ride alongside the packed points.
+func ffiRansac(libPath, op string, data *float64, n int, threshold float64, iterations int, seed uint64, out **byte, outLen *uintptr) (int32, error) {
+	proc, release, err := openProc(libPath, op)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	var cOut *byte
+	var cLen uintptr
+	rc, _, _ := syscall.SyscallN(proc,
+		uintptr(unsafe.Pointer(data)),
+		uintptr(n),
+		uintptr(math.Float64bits(threshold)),
+		uintptr(iterations),
+		uintptr(seed),
+		uintptr(unsafe.Pointer(&cOut)),
+		uintptr(unsafe.Pointer(&cLen)),
+	)
+	*out = cOut
+	*outLen = cLen
 	return int32(rc), nil
 }
 

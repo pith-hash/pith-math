@@ -24,5 +24,25 @@ func ffiScalar(string, *byte, int, *float64) (int32, error) {
 	return 0, fmt.Errorf("pithmath: cgo is required to load the cdylib on this platform (build with CGO_ENABLED=1)")
 }
 
+// ffiAllocLen mirrors the unavailable alloc.
+func ffiAllocLen(string, *float64, int, int, **byte, *uintptr) (int32, error) {
+	return 0, fmt.Errorf("pithmath: cgo is required to load the cdylib on this platform (build with CGO_ENABLED=1)")
+}
+
+// ffiScalarLen mirrors the unavailable alloc.
+func ffiScalarLen(string, *float64, int, int, *float64) (int32, error) {
+	return 0, fmt.Errorf("pithmath: cgo is required to load the cdylib on this platform (build with CGO_ENABLED=1)")
+}
+
+// ffiScalarArg mirrors the unavailable alloc.
+func ffiScalarArg(string, *float64, int, float64, *float64) (int32, error) {
+	return 0, fmt.Errorf("pithmath: cgo is required to load the cdylib on this platform (build with CGO_ENABLED=1)")
+}
+
+// ffiRansac mirrors the unavailable alloc.
+func ffiRansac(string, *float64, int, float64, int, uint64, **byte, *uintptr) (int32, error) {
+	return 0, fmt.Errorf("pithmath: cgo is required to load the cdylib on this platform (build with CGO_ENABLED=1)")
+}
+
 // ffiFree mirrors the unavailable alloc.
 func ffiFree(string, *byte, uintptr) {}

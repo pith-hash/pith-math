@@ -21,21 +21,46 @@ import pytest
 
 from pith_math import (
     FfiError,
+    complex_arg,
+    complex_div,
+    complex_exp,
+    complex_log,
+    complex_mul,
+    complex_powi,
+    complex_sqrt,
+    conv,
+    corr,
+    cov,
     dct2,
     dct2_2d,
+    dct3,
+    dct3_2d,
     det3,
+    dtw,
     fft,
+    fft_n,
     fft_real,
     find_cdylib,
     idct2,
     ifft,
+    ifft_n,
     inverse3,
+    lagrange,
     mat3_mul,
     mat3_mul_vec,
+    mean,
     median,
+    ransac_line,
     solve3,
     transpose3,
+    variance,
 )
+
+
+def lerp(a: float, b: float, t: float) -> float:
+    """The same linear interpolation the core exposes; kept local so
+    the vector replay needs no extra export binding."""
+    return a + (b - a) * t
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -84,6 +109,51 @@ def run_op(name: str, x: list[float]) -> list[float]:
         return mat3_mul_vec(x[:9], x[9:12])
     if name == "transpose3":
         return transpose3(x)
+    if name in ("bluestein.n17", "bluestein.n97", "bluestein.n8.crosscheck"):
+        return fft_n(x)
+    if name == "bluestein.roundtrip.n12":
+        return ifft_n(fft_n(x))
+    if name in ("complex.mul.exact", "complex.div.exact"):
+        op = complex_mul if name.startswith("complex.mul") else complex_div
+        return op(x[:2], x[2:4])
+    if name == "complex.exp.i.pi":
+        return complex_exp(x)
+    if name == "complex.sqrt.i":
+        return complex_sqrt(x)
+    if name == "complex.powi.exact":
+        return complex_powi(x, 4)
+    if name == "complex.arg.quarter":
+        return [complex_arg(x)]
+    if name == "dct3.n8":
+        return dct3(x)
+    if name == "dct3.roundtrip.n8":
+        return dct3(dct2(x))
+    if name == "conv.small.exact":
+        return conv(x[:3], x[3:])
+    if name == "conv.fft.path":
+        return conv(x[:128], x[128:])
+    if name == "corr.small.exact":
+        return corr(x[:2], x[2:])
+    if name == "stats.mean.exact":
+        return [mean(x)]
+    if name == "stats.var.sample.exact":
+        return [variance(x)]
+    if name == "stats.var.sample.textbook":
+        return [variance(x)]
+    if name == "stats.cov.sample.exact":
+        return [cov(x)]
+    if name == "interp.lagrange.quadratic.exact":
+        return [lagrange(x[:6:2], x[1:6:2], x[6])]
+    if name == "interp.lerp.midpoint.exact":
+        return [lerp(x[0], x[1], x[2])]
+    if name == "ransac.line.fit":
+        # The packed input is interleaved (x, y) points.
+        slope, intercept, inliers = ransac_line(x[0::2], x[1::2], 0.5, 64, 42)
+        return [slope, intercept, float(inliers)]
+    if name == "dtw.textbook.3x3":
+        return [dtw(x[:3], x[3:])]
+    if name == "dtw.textbook.2x3":
+        return [dtw(x[:2], x[2:])]
     raise AssertionError(f"no op mapping for {name}")
 
 

@@ -14,7 +14,7 @@ categories = ["algorithms", "cryptography"]
 # only the conformance tests use its SplitMix64, and crates.io rejects
 # git deps in [dependencies] (this keeps `cargo publish` viable).
 [dev-dependencies]
-pith-digest = { git = "https://github.com/pith-hash/pith-digest.git", branch = "main" }
+pith-digest = { version = "0.1", git = "https://github.com/pith-hash/pith-digest.git", branch = "main" }
 
 # The reference-vector generator (tools/gen-reference) is a bin of this
 # package so `cargo run --locked --bin gen-reference -- verify` works from

@@ -39,9 +39,6 @@ static int32_t pith_call_alloc_len(void *fn, const double *in, size_t len,
     return ((pith_alloc_len_fn)fn)(in, len, a_len, out, out_len);
 }
 
-static int32_t pith_call_scalar(void *fn, const double *in, size_t len, double *out) {
-    return ((pith_scalar_fn)fn)(in, len, out);
-}
 
 static int32_t pith_call_scalar_len(void *fn, const double *in, size_t len,
                                     size_t a_len, double *out) {

@@ -6,13 +6,35 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.pithhash</groupId>
+  <groupId>io.github.pith-hash</groupId>
   <artifactId>pith-math</artifactId>
   <version>0.1.0</version>
   <packaging>jar</packaging>
 
   <name>pith-math JNI SDK</name>
   <description>FFT, DCT, complex arithmetic, convolution, statistics, interpolation, RANSAC and DTW through the pith-math cdylib (JNI).</description>
+
+  <url>https://pith-math.n24q02m.com</url>
+
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://github.com/pith-hash/pith-math/blob/main/LICENSE</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>pith-hash</id>
+      <name>pith-hash</name>
+      <url>https://github.com/pith-hash</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://github.com/pith-hash/pith-math</url>
+    <connection>scm:git:git://github.com/pith-hash/pith-math.git</connection>
+  </scm>
 
   <properties>
     <maven.compiler.release>11</maven.compiler.release>

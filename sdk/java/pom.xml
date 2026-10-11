@@ -62,7 +62,7 @@
   </build>
   <profiles>
 <profile>
-      <id>central</id>
+      <id>release</id>
       <build>
         <plugins>
           <plugin>
@@ -80,6 +80,11 @@
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-javadoc-plugin</artifactId>
             <version>3.11.2</version>
+            <configuration>
+              <!-- The JNI bindings are deliberately terse; doclint failures
+                   must not block a Central release. -->
+              <doclint>none</doclint>
+            </configuration>
             <executions>
               <execution>
                 <id>attach-javadocs</id>
@@ -106,7 +111,6 @@
             <extensions>true</extensions>
             <configuration>
               <publishingServerId>central</publishingServerId>
-              <waitUntil>published</waitUntil>
               <autoPublish>true</autoPublish>
             </configuration>
           </plugin>

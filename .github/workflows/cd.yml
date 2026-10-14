@@ -247,9 +247,11 @@ jobs:
         run: cargo build --workspace --release --locked
       - name: Regenerate reference.json (hex-exact vectors)
         # Written next to the artifacts so every SDK package ships byte-identical
-        # vectors; the committed copy is verified in ci.yml.
+        # vectors; the committed copy is verified in ci.yml. The path is explicit
+        # because this repo's gen-reference defaults to tests/reference.json, while
+        # the upload and the npm assemble step below read the repository root.
         shell: bash
-        run: cargo run --locked --bin gen-reference -- gen
+        run: cargo run --locked --bin gen-reference -- gen reference.json
       - name: Collect cdylibs for the SDKs
         shell: bash
         run: |

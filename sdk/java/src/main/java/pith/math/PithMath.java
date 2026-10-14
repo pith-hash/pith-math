@@ -70,6 +70,11 @@ public final class PithMath {
                 }
             }
         }
+        String bundled = BundledNative.extract(CDYLIB_NAMES);
+        if (bundled != null) {
+            return bundled;
+        }
+
         File repoRoot = new File(System.getProperty("user.dir")).getAbsoluteFile()
                 .getParentFile().getParentFile();
         File release = new File(repoRoot, "target" + File.separator + "release");
@@ -81,7 +86,8 @@ public final class PithMath {
         }
         throw new UnsatisfiedLinkError(
                 "no pith-math cdylib found (searched PITH_CDYLIB, PITH_CDYLIB_DIR"
-                + " and <repo>/target/release); run `cargo build --release` first");
+                + " and <repo>/target/release); run `cargo build --release` first"
+                + BundledNative.platformNote());
     }
 
     // -- DCT family ---------------------------------------------------------

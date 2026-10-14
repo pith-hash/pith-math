@@ -484,7 +484,11 @@ fn complex_arg_core(flat: &[f64]) -> Result<f64, i32> {
 ///
 /// `input` must point to `in_len` readable `f64`s; `out` and `out_len`
 /// to writable slots. No pointer is retained.
-#[unsafe(no_mangle)]
+// Every export in this module is `no_mangle` outside `cfg(test)` only. Built twice
+// (unit-test binary and shipped library) one `no_mangle` symbol gets two coverage
+// hashes, and `llvm-cov` keeps whichever copy it reads first, so the coverage gate
+// would depend on object order. A unit-test build keeps the normal mangled names.
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_dct2(
     input: *const f64,
     in_len: usize,
@@ -500,7 +504,7 @@ pub unsafe extern "C" fn pith_math_dct2(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_idct2(
     input: *const f64,
     in_len: usize,
@@ -519,7 +523,7 @@ pub unsafe extern "C" fn pith_math_idct2(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_dct2_2d(
     input: *const f64,
     in_len: usize,
@@ -548,7 +552,7 @@ pub unsafe extern "C" fn pith_math_dct2_2d(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_fft(
     input: *const f64,
     in_len: usize,
@@ -564,7 +568,7 @@ pub unsafe extern "C" fn pith_math_fft(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_ifft(
     input: *const f64,
     in_len: usize,
@@ -582,7 +586,7 @@ pub unsafe extern "C" fn pith_math_ifft(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_fft_real(
     input: *const f64,
     in_len: usize,
@@ -603,7 +607,7 @@ pub unsafe extern "C" fn pith_math_fft_real(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_solve3(
     input: *const f64,
     in_len: usize,
@@ -620,7 +624,7 @@ pub unsafe extern "C" fn pith_math_solve3(
 ///
 /// `input` must point to 9 readable `f64`s and `out` to one writable
 /// `f64`.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_det3(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
     if input.is_null() || out.is_null() {
         return PITH_E_INVALID;
@@ -641,7 +645,7 @@ pub unsafe extern "C" fn pith_math_det3(input: *const f64, in_len: usize, out: *
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_inverse3(
     input: *const f64,
     in_len: usize,
@@ -657,7 +661,7 @@ pub unsafe extern "C" fn pith_math_inverse3(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_transpose3(
     input: *const f64,
     in_len: usize,
@@ -673,7 +677,7 @@ pub unsafe extern "C" fn pith_math_transpose3(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_mat3_mul(
     input: *const f64,
     in_len: usize,
@@ -689,7 +693,7 @@ pub unsafe extern "C" fn pith_math_mat3_mul(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_mat3_mul_vec(
     input: *const f64,
     in_len: usize,
@@ -708,7 +712,7 @@ pub unsafe extern "C" fn pith_math_mat3_mul_vec(
 ///
 /// `input` must point to `in_len` readable `f64`s and `out` to one
 /// writable `f64`.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_median(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
     if input.is_null() || out.is_null() {
         return PITH_E_INVALID;
@@ -732,7 +736,7 @@ pub unsafe extern "C" fn pith_math_median(input: *const f64, in_len: usize, out:
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_fft_n(
     input: *const f64,
     in_len: usize,
@@ -749,7 +753,7 @@ pub unsafe extern "C" fn pith_math_fft_n(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_dct3(
     input: *const f64,
     in_len: usize,
@@ -765,7 +769,7 @@ pub unsafe extern "C" fn pith_math_dct3(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_dct3_2d(
     input: *const f64,
     in_len: usize,
@@ -789,7 +793,7 @@ pub unsafe extern "C" fn pith_math_dct3_2d(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_ifft_n(
     input: *const f64,
     in_len: usize,
@@ -807,7 +811,7 @@ pub unsafe extern "C" fn pith_math_ifft_n(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_conv(
     input: *const f64,
     in_len: usize,
@@ -832,7 +836,7 @@ pub unsafe extern "C" fn pith_math_conv(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_corr(
     input: *const f64,
     in_len: usize,
@@ -857,7 +861,7 @@ pub unsafe extern "C" fn pith_math_corr(
 ///
 /// `input` must point to `in_len` readable `f64`s and `out` to one
 /// writable `f64`.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_mean(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
     unsafe { run_scalar(input, in_len, out, mean_core) }
 }
@@ -868,7 +872,7 @@ pub unsafe extern "C" fn pith_math_mean(input: *const f64, in_len: usize, out: *
 /// # Safety
 ///
 /// See [`pith_math_mean`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_var(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
     unsafe { run_scalar(input, in_len, out, var_core) }
 }
@@ -881,7 +885,7 @@ pub unsafe extern "C" fn pith_math_var(input: *const f64, in_len: usize, out: *m
 /// # Safety
 ///
 /// See [`pith_math_mean`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_cov(input: *const f64, in_len: usize, out: *mut f64) -> i32 {
     unsafe { run_scalar(input, in_len, out, cov_core) }
 }
@@ -894,7 +898,7 @@ pub unsafe extern "C" fn pith_math_cov(input: *const f64, in_len: usize, out: *m
 ///
 /// `input` must point to `in_len` readable `f64`s (an even count, the
 /// interleaved pairs) and `out` to one writable `f64`.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_lagrange(
     input: *const f64,
     in_len: usize,
@@ -921,7 +925,7 @@ pub unsafe extern "C" fn pith_math_lagrange(
 /// # Safety
 ///
 /// See [`pith_math_mean`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_dtw(
     input: *const f64,
     in_len: usize,
@@ -954,7 +958,7 @@ pub unsafe extern "C" fn pith_math_dtw(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_ransac_line(
     input: *const f64,
     in_len: usize,
@@ -980,7 +984,7 @@ pub unsafe extern "C" fn pith_math_ransac_line(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_mul(
     input: *const f64,
     in_len: usize,
@@ -996,7 +1000,7 @@ pub unsafe extern "C" fn pith_math_complex_mul(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_div(
     input: *const f64,
     in_len: usize,
@@ -1011,7 +1015,7 @@ pub unsafe extern "C" fn pith_math_complex_div(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_exp(
     input: *const f64,
     in_len: usize,
@@ -1030,7 +1034,7 @@ pub unsafe extern "C" fn pith_math_complex_exp(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_sqrt(
     input: *const f64,
     in_len: usize,
@@ -1059,7 +1063,7 @@ fn complex_log_core(flat: &[f64]) -> Result<Vec<f64>, i32> {
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_log(
     input: *const f64,
     in_len: usize,
@@ -1075,7 +1079,7 @@ pub unsafe extern "C" fn pith_math_complex_log(
 /// # Safety
 ///
 /// See [`pith_math_dct2`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_powi(
     input: *const f64,
     in_len: usize,
@@ -1099,7 +1103,7 @@ pub unsafe extern "C" fn pith_math_complex_powi(
 /// # Safety
 ///
 /// See [`pith_math_mean`].
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_complex_arg(
     input: *const f64,
     in_len: usize,
@@ -1118,7 +1122,7 @@ pub unsafe extern "C" fn pith_math_complex_arg(
 /// `ptr` must be a pointer the cdylib handed out with the `out_len`
 /// byte count that came back with it, and must not have been released
 /// (or otherwise freed) before.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn pith_math_free(ptr: *mut f64, len: usize) {
     if ptr.is_null() {
         return;

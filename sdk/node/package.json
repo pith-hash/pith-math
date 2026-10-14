@@ -1,6 +1,6 @@
 {
   "name": "@pith-hash/pith-math",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.1",
   "description": "FFT, DCT-II, median and 3x3 linear algebra SDK via the pith-math Rust cdylib (koffi, prebuilt)",
   "license": "MIT",
   "main": "index.js",

@@ -9,7 +9,7 @@ source = "git+https://github.com/pith-hash/pith-digest.git?branch=main#3d1f384fd
 
 [[package]]
 name = "pith-math"
-version = "0.1.1-beta.1"
+version = "0.1.1-beta.2"
 dependencies = [
  "pith-digest",
 ]
